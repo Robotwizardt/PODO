@@ -1,0 +1,27 @@
+﻿<Project Sdk="Microsoft.NET.Sdk.WindowsDesktop">
+  <PropertyGroup>
+    <!-- PODO embeds this dependency only for PaperTodo's paper UI. -->
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <NoWarn>$(NoWarn);NETSDK1137</NoWarn>
+    <Nullable>disable</Nullable>
+    <IsPackable>false</IsPackable>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <SignAssembly>false</SignAssembly>
+    <RootNamespace>Hardcodet.Wpf.TaskbarNotification</RootNamespace>
+    <AssemblyName>Hardcodet.NotifyIcon.Wpf</AssemblyName>
+    <AssemblyTitle>NotifyIcon for WPF</AssemblyTitle>
+    <Product>NotifyIcon WPF</Product>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Keep WPF names unambiguous while retaining WinForms cursor support. -->
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Threading" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="Diagrams\TaskbarIcon Overview.cd" />
+  </ItemGroup>
+</Project>

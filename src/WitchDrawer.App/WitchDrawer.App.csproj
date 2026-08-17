@@ -1,0 +1,75 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\WitchDrawer.Core\WitchDrawer.Core.csproj" />
+    <ProjectReference Include="..\WitchDrawer.Native\WitchDrawer.Native.csproj" />
+    <ProjectReference Include="..\PaperTodo.NotifyIconWpf\NotifyIconWpf.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- PaperTodo uses WPF types alongside a few WinForms APIs. -->
+    <Using Remove="System.Drawing" />
+    <Using Remove="System.Windows.Forms" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <!-- PaperTodo is hosted inside PODO for the desktop-paper experience. -->
+    <PackageReference Include="AvalonEdit" Version="6.3.1.120" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.10" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4078.44" />
+    <PackageReference Include="ModelContextProtocol" Version="2.0.0" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <AssemblyName>PODO</AssemblyName>
+    <Product>PODO</Product>
+    <Description>Windows 原生桌面收纳盒与项目工作台</Description>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <NoWarn>$(NoWarn);WFO0003</NoWarn>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\app.ico" />
+    <Resource Include="Assets\app.png" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="Assets\app.ico" CopyToOutputDirectory="Always" CopyToPublishDirectory="Always" />
+    <Content Include="PaperTodo\native\lmdb\bin\win-x64\papertodo_lmdb.dll">
+      <Link>papertodo_lmdb.dll</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- PODO owns process startup and lifetime; PaperTodo's standalone App is not used. -->
+    <Compile Remove="PaperTodo\App.xaml.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- PaperTodo's ResourceManager uses its original assembly resource names. -->
+    <EmbeddedResource Update="PaperTodo\Resources\Strings.resx">
+      <LogicalName>PaperTodo.Resources.Strings.resources</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Update="PaperTodo\Resources\Strings.en.resx">
+      <LogicalName>PaperTodo.Resources.Strings.en.resources</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Update="PaperTodo\Resources\Strings.ja.resx">
+      <LogicalName>PaperTodo.Resources.Strings.ja.resources</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Update="PaperTodo\Resources\Strings.ko.resx">
+      <LogicalName>PaperTodo.Resources.Strings.ko.resources</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
+</Project>

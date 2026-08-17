@@ -1,0 +1,24 @@
+bin/
+!src/WitchDrawer.App/PaperTodo/native/lmdb/bin/
+!src/WitchDrawer.App/PaperTodo/native/lmdb/bin/win-x64/
+!src/WitchDrawer.App/PaperTodo/native/lmdb/bin/win-x64/papertodo_lmdb.dll
+obj/
+.vs/
+.idea/
+*.user
+*.suo
+TestResults/
+coverage/
+*.log
+*.db
+*.db-shm
+*.db-wal
+
+
+publish/
+
+# 本地调试截图与辅助脚本，不入库
+artifacts/
+.scratch/
+.verify-*/
+.verify-*.pid

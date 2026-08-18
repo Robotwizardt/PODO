@@ -94,20 +94,25 @@ public sealed class DrawerService
             return await _repository.GetItemsAsync(boxId, cancellationToken);
         }
 
+        if (box.Type is BoxType.Normal or BoxType.Pixel or BoxType.Drawer)
+        {
+            await SynchronizeManagedStorageBoxAsync(box, cancellationToken);
+        }
+
         await PruneMissingStoredItemsAsync(boxId, cancellationToken);
         return await _repository.GetItemsAsync(boxId, cancellationToken);
     }
 
     public async Task<IReadOnlyList<DrawerItem>> GetAllItemsAsync(CancellationToken cancellationToken = default)
     {
-        await SynchronizeAllBoundBoxesAsync(cancellationToken);
+        await SynchronizeAllStorageBoxesAsync(cancellationToken);
         await PruneMissingStoredItemsAsync(null, cancellationToken);
         return await _repository.GetItemsAsync(null, cancellationToken);
     }
 
     public async Task<IReadOnlyList<DrawerItem>> SearchItemsAsync(string query, int limit = 200, CancellationToken cancellationToken = default)
     {
-        await SynchronizeAllBoundBoxesAsync(cancellationToken);
+        await SynchronizeAllStorageBoxesAsync(cancellationToken);
         await PruneMissingStoredItemsAsync(null, cancellationToken);
         return await _repository.SearchItemsAsync(query.Trim(), limit, cancellationToken);
     }
@@ -466,6 +471,59 @@ public sealed class DrawerService
             StoredPath = targetPath,
             UpdatedAt = updatedAt
         };
+    }
+
+    public async Task<bool> SynchronizeExternalRenameAsync(
+        Guid boxId,
+        string oldPath,
+        string newPath,
+        CancellationToken cancellationToken = default)
+    {
+        var box = await _repository.GetBoxAsync(boxId, cancellationToken)
+            ?? throw new InvalidOperationException("Box does not exist.");
+        if (box.Type is not (BoxType.Normal or BoxType.Pixel or BoxType.Drawer or BoxType.Bound))
+        {
+            return false;
+        }
+
+        var storageRoot = GetStorageRoot(box, createIfMissing: false);
+        var normalizedOldPath = Path.GetFullPath(oldPath);
+        var normalizedNewPath = Path.GetFullPath(newPath);
+        PathSafety.EnsureChildPath(storageRoot, normalizedOldPath);
+        PathSafety.EnsureChildPath(storageRoot, normalizedNewPath);
+        if (!IsSamePath(Path.GetDirectoryName(normalizedOldPath), storageRoot)
+            || !IsSamePath(Path.GetDirectoryName(normalizedNewPath), storageRoot)
+            || (!File.Exists(normalizedNewPath) && !Directory.Exists(normalizedNewPath)))
+        {
+            return false;
+        }
+
+        using var syncGate = await AcquireBoundSyncGateAsync(true, cancellationToken);
+        var item = (await _repository.GetItemsAsync(boxId, cancellationToken))
+            .FirstOrDefault(candidate => !string.IsNullOrWhiteSpace(candidate.StoredPath)
+                && IsSamePath(candidate.StoredPath, normalizedOldPath));
+        if (item is null)
+        {
+            return false;
+        }
+
+        var displayName = Path.GetFileName(
+            normalizedNewPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        var sourcePath = box.Type == BoxType.Bound
+            ? normalizedNewPath
+            : string.IsNullOrWhiteSpace(item.SourcePath)
+                ? null
+                : Path.Combine(
+                    Path.GetDirectoryName(item.SourcePath) ?? storageRoot,
+                    displayName);
+        await _repository.UpdateItemFileSystemIdentityAsync(
+            item.Id,
+            displayName,
+            sourcePath,
+            normalizedNewPath,
+            DateTimeOffset.UtcNow,
+            cancellationToken);
+        return true;
     }
 
     public async Task<IReadOnlyList<DrawerItem>> CopyPathsIntoBoxAsync(
@@ -969,6 +1027,100 @@ public sealed class DrawerService
         }
     }
 
+    private async Task SynchronizeAllStorageBoxesAsync(CancellationToken cancellationToken)
+    {
+        var boxes = await _repository.GetBoxesAsync(cancellationToken);
+        foreach (var box in boxes)
+        {
+            if (box.Type == BoxType.Bound)
+            {
+                await SynchronizeBoundBoxAsync(box, cancellationToken);
+            }
+            else if (box.Type is BoxType.Normal or BoxType.Pixel or BoxType.Drawer)
+            {
+                await SynchronizeManagedStorageBoxAsync(box, cancellationToken);
+            }
+        }
+    }
+
+    private async Task SynchronizeManagedStorageBoxAsync(
+        Box box,
+        CancellationToken cancellationToken)
+    {
+        if (box.Type is not (BoxType.Normal or BoxType.Pixel or BoxType.Drawer)
+            || string.IsNullOrWhiteSpace(box.StoragePath))
+        {
+            return;
+        }
+
+        await _boundSyncGate.WaitAsync(cancellationToken);
+        try
+        {
+            var storageRoot = Path.GetFullPath(box.StoragePath);
+            if (!Directory.Exists(storageRoot))
+            {
+                return;
+            }
+
+            FileSystemEntry[] entries;
+            try
+            {
+                entries = await Task.Run(
+                    () => Directory
+                        .EnumerateFileSystemEntries(storageRoot, "*", SearchOption.TopDirectoryOnly)
+                        .Select(CreateBoundFileSystemEntry)
+                        .Where(entry => entry is not null)
+                        .Select(entry => entry!)
+                        .ToArray(),
+                    cancellationToken);
+            }
+            catch (IOException)
+            {
+                return;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return;
+            }
+
+            var currentItems = await _repository.GetItemsAsync(box.Id, cancellationToken);
+            var existingPaths = currentItems
+                .Where(item => !string.IsNullOrWhiteSpace(item.StoredPath))
+                .Select(item => Path.GetFullPath(item.StoredPath!))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var nextSortOrder = currentItems
+                .Select(item => item.SortOrder)
+                .DefaultIfEmpty(-1)
+                .Max() + 1;
+            var now = DateTimeOffset.UtcNow;
+
+            foreach (var entry in entries)
+            {
+                if (existingPaths.Contains(entry.Path))
+                {
+                    continue;
+                }
+
+                await _repository.AddItemAsync(
+                    new DrawerItem(
+                        Guid.NewGuid(),
+                        box.Id,
+                        entry.DisplayName,
+                        entry.IsDirectory ? ItemKind.Directory : ItemKind.File,
+                        SourcePath: null,
+                        entry.Path,
+                        nextSortOrder++,
+                        now,
+                        now),
+                    cancellationToken);
+            }
+        }
+        finally
+        {
+            _boundSyncGate.Release();
+        }
+    }
+
     private async Task SynchronizeBoundBoxAsync(
         Box box,
         CancellationToken cancellationToken)
@@ -1078,10 +1230,16 @@ public sealed class DrawerService
             }
 
             var fullPath = Path.GetFullPath(path);
+            var isDirectory = (attributes & FileAttributes.Directory) != 0;
+            if (!isDirectory && IsIncompleteDownloadPath(fullPath))
+            {
+                return null;
+            }
+
             return new FileSystemEntry(
                 fullPath,
                 Path.GetFileName(fullPath),
-                (attributes & FileAttributes.Directory) != 0);
+                isDirectory);
         }
         catch (FileNotFoundException)
         {
@@ -1095,6 +1253,16 @@ public sealed class DrawerService
         {
             return null;
         }
+    }
+
+    private static bool IsIncompleteDownloadPath(string path)
+    {
+        var extension = Path.GetExtension(path);
+        return extension.Equals(".tmp", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".crdownload", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".part", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".partial", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".download", StringComparison.OrdinalIgnoreCase);
     }
 
     private string GetStorageRoot(Box box, bool createIfMissing)
@@ -1304,11 +1472,20 @@ public sealed class DrawerService
             return;
         }
 
-        var boundBoxIds = (await _repository.GetAllBoxesAsync(cancellationToken))
+        var allBoxes = await _repository.GetAllBoxesAsync(cancellationToken);
+        var boundBoxIds = allBoxes
             .Where(box => box.Type == BoxType.Bound)
             .Select(box => box.Id)
             .ToHashSet();
-        if (boxId is Guid requestedBoxId && boundBoxIds.Contains(requestedBoxId))
+        var unavailableManagedBoxIds = allBoxes
+            .Where(box => box.Type is BoxType.Normal or BoxType.Pixel or BoxType.Drawer)
+            .Where(box => string.IsNullOrWhiteSpace(box.StoragePath)
+                || !Directory.Exists(box.StoragePath))
+            .Select(box => box.Id)
+            .ToHashSet();
+        if (boxId is Guid requestedBoxId
+            && (boundBoxIds.Contains(requestedBoxId)
+                || unavailableManagedBoxIds.Contains(requestedBoxId)))
         {
             return;
         }
@@ -1319,6 +1496,7 @@ public sealed class DrawerService
             cancellationToken.ThrowIfCancellationRequested();
             return items
                 .Where(item => !boundBoxIds.Contains(item.BoxId))
+                .Where(item => !unavailableManagedBoxIds.Contains(item.BoxId))
                 .Where(IsMissingStoredItem)
                 .Select(item => item.Id)
                 .ToArray();

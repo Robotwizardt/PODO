@@ -6,12 +6,14 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="WitchDrawer.App.Tests" />
+    <Using Include="System.IO" />
   </ItemGroup>
 
   <PropertyGroup>
     <TargetFramework>net10.0-windows</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <UseWPF>true</UseWPF>
   </PropertyGroup>
 
 </Project>

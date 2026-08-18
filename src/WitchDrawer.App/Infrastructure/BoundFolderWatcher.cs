@@ -33,6 +33,8 @@ public sealed class BoundFolderWatcher : IDisposable
 
     public event EventHandler? Changed;
 
+    public event EventHandler<StorageFolderRenamedEventArgs>? Renamed;
+
     private void OnFileSystemChanged(object sender, FileSystemEventArgs e)
     {
         QueueChanged();
@@ -40,6 +42,9 @@ public sealed class BoundFolderWatcher : IDisposable
 
     private void OnFileSystemRenamed(object sender, RenamedEventArgs e)
     {
+        Renamed?.Invoke(
+            this,
+            new StorageFolderRenamedEventArgs(e.OldFullPath, e.FullPath));
         QueueChanged();
     }
 
@@ -110,3 +115,5 @@ public sealed class BoundFolderWatcher : IDisposable
         _watcher.Dispose();
     }
 }
+
+public sealed record StorageFolderRenamedEventArgs(string OldPath, string NewPath);

@@ -3,6 +3,7 @@ using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
@@ -28,8 +29,10 @@ public partial class DesktopBoxWindow : Window
     private Point? _dragStartPoint;
     private DrawerItemViewModel? _dragStartItem;
     private readonly DragOperationGate _itemDragGate = new();
+    private readonly ListCollectionView _fileItemsView;
     private DrawerItemViewModel? _keyboardDeleteTarget;
     private DrawerItemViewModel? _fileItemRenameTarget;
+    private string _fileItemRenameExtension = string.Empty;
     private Func<Guid, Point?, bool, Task>? _positionChangedCallback;
     private Func<Guid, string, Task>? _renameBoxCallback;
     private Func<Guid, Task>? _togglePositionLockCallback;
@@ -80,6 +83,13 @@ public partial class DesktopBoxWindow : Window
     {
         DataContext = viewModel;
         InitializeComponent();
+        _fileItemsView = new ListCollectionView(ViewModel.Items)
+        {
+            Filter = MatchesFileSearch
+        };
+        IconList.ItemsSource = _fileItemsView;
+        FileList.ItemsSource = _fileItemsView;
+        FileSearchBox.TextChanged += OnFileSearchTextChanged;
         SourceInitialized += OnSourceInitialized;
         Loaded += OnLoaded;
         DpiChanged += OnDpiChanged;
@@ -851,6 +861,65 @@ public partial class DesktopBoxWindow : Window
         }
 
         return null;
+    }
+
+    private static T? FindVisualDescendant<T>(DependencyObject source)
+        where T : DependencyObject
+    {
+        for (var index = 0; index < VisualTreeHelper.GetChildrenCount(source); index++)
+        {
+            var child = VisualTreeHelper.GetChild(source, index);
+            if (child is T typed)
+            {
+                return typed;
+            }
+
+            if (FindVisualDescendant<T>(child) is { } descendant)
+            {
+                return descendant;
+            }
+        }
+
+        return null;
+    }
+
+    private void OnFileItemsPreviewMouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        if (e.Delta < 0 && FileSearchBar.Visibility == Visibility.Visible)
+        {
+            FileSearchBar.Visibility = Visibility.Collapsed;
+            FileSearchBox.Clear();
+            return;
+        }
+
+        if (e.Delta <= 0
+            || FileSearchBar.Visibility == Visibility.Visible
+            || ViewModel.Type is BoxType.Todo or BoxType.Note or BoxType.Project or BoxType.ProjectFolder)
+        {
+            return;
+        }
+
+        var scrollViewer = FindVisualDescendant<ScrollViewer>(ActiveItemsList);
+        if (scrollViewer is not null && scrollViewer.VerticalOffset > 0)
+        {
+            return;
+        }
+
+        FileSearchBar.Visibility = Visibility.Visible;
+        e.Handled = true;
+    }
+
+    private void OnFileSearchTextChanged(object sender, TextChangedEventArgs e)
+    {
+        _fileItemsView.Refresh();
+    }
+
+    private bool MatchesFileSearch(object item)
+    {
+        var query = FileSearchBox.Text.Trim();
+        return query.Length == 0
+            || item is DrawerItemViewModel drawerItem
+            && drawerItem.DisplayName.Contains(query, StringComparison.OrdinalIgnoreCase);
     }
 
     public void ForceClose()
@@ -1754,7 +1823,21 @@ public partial class DesktopBoxWindow : Window
     private void OpenFileItemRename(DrawerItemViewModel item)
     {
         _fileItemRenameTarget = item;
-        FileItemRenameTextBox.Text = item.Model.DisplayName;
+        _fileItemRenameExtension = item.Model.ItemKind == ItemKind.File
+            ? Path.GetExtension(item.Model.DisplayName)
+            : string.Empty;
+        if (_fileItemRenameExtension.Length == item.Model.DisplayName.Length)
+        {
+            _fileItemRenameExtension = string.Empty;
+        }
+
+        FileItemRenameTextBox.Text = string.IsNullOrEmpty(_fileItemRenameExtension)
+            ? item.Model.DisplayName
+            : item.Model.DisplayName[..^_fileItemRenameExtension.Length];
+        FileItemRenameExtensionText.Text = _fileItemRenameExtension;
+        FileItemRenameExtensionContainer.Visibility = string.IsNullOrEmpty(_fileItemRenameExtension)
+            ? Visibility.Collapsed
+            : Visibility.Visible;
         FileItemRenamePopup.IsOpen = true;
         Dispatcher.BeginInvoke(() =>
         {
@@ -1768,11 +1851,13 @@ public partial class DesktopBoxWindow : Window
     private async void OnConfirmFileItemRename(object sender, RoutedEventArgs e)
     {
         var item = _fileItemRenameTarget;
-        var newName = FileItemRenameTextBox.Text.Trim();
-        if (item is null || string.IsNullOrWhiteSpace(newName))
+        var newBaseName = FileItemRenameTextBox.Text.Trim();
+        if (item is null || string.IsNullOrWhiteSpace(newBaseName))
         {
             return;
         }
+
+        var newName = $"{newBaseName}{_fileItemRenameExtension}";
 
         FileItemRenamePopup.IsOpen = false;
         _fileItemRenameTarget = null;

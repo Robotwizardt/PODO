@@ -3051,6 +3051,72 @@
                                 </Grid>
                                 </Border>
 
+                                <!-- File Dialog Access Window Card -->
+                                <Border Background="{DynamicResource PanelBrush}"
+                                        BorderBrush="{DynamicResource BorderBrushSoft}"
+                                        BorderThickness="1"
+                                        CornerRadius="12"
+                                        Padding="10"
+                                        Margin="0,0,0,6">
+                                    <Grid>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                            <TextBlock Text="文件对话框访问窗"
+                                                       FontWeight="SemiBold"
+                                                       FontSize="13"
+                                                       Foreground="{DynamicResource TextPrimaryBrush}" />
+                                            <TextBlock Text="在打开或保存窗口旁显示具有真实目录的收纳盒"
+                                                       Margin="0,2,12,0"
+                                                       FontSize="11.5"
+                                                       TextWrapping="Wrap"
+                                                       Foreground="{DynamicResource TextMutedBrush}" />
+                                        </StackPanel>
+                                        <Button Grid.Column="1"
+                                                Command="{Binding ToggleFileDialogAccessCommand}"
+                                                VerticalAlignment="Center"
+                                                AutomationProperties.Name="切换文件对话框访问窗">
+                                            <Button.Style>
+                                                <Style TargetType="{x:Type Button}"
+                                                       BasedOn="{StaticResource SettingsToggleButtonStyle}">
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsFileDialogAccessEnabled}" Value="True">
+                                                            <Setter Property="Content" Value="已开启" />
+                                                            <Setter Property="Foreground" Value="White" />
+                                                            <Setter Property="Background" Value="{DynamicResource AccentBrush}" />
+                                                            <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Button.Style>
+                                        </Button>
+                                        <Grid Grid.Row="1"
+                                              Grid.ColumnSpan="2"
+                                              Margin="0,9,0,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="{Binding FileDialogAccessBlacklistText}"
+                                                       VerticalAlignment="Center"
+                                                       FontSize="10.5"
+                                                       Foreground="{DynamicResource TextMutedBrush}" />
+                                            <Button Grid.Column="1"
+                                                    Content="清空黑名单"
+                                                    Command="{Binding ClearFileDialogAccessBlacklistCommand}"
+                                                    Height="26"
+                                                    Padding="10,0"
+                                                    AutomationProperties.Name="清空文件对话框访问窗应用黑名单" />
+                                        </Grid>
+                                    </Grid>
+                                </Border>
+
                                 <!-- Windows Desktop Icons Card -->
                                 <Border Background="{DynamicResource PanelBrush}"
                                         BorderBrush="{DynamicResource BorderBrushSoft}"

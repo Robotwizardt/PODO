@@ -904,6 +904,64 @@
                 </StackPanel>
             </Grid>
 
+            <Grid x:Name="FileItemsHost"
+                  Grid.Row="1"
+                  PreviewMouseWheel="OnFileItemsPreviewMouseWheel">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <Border x:Name="FileSearchBar"
+                        Grid.Row="0"
+                        Height="30"
+                        Margin="6,0,6,4"
+                        Padding="7,0"
+                        Background="{DynamicResource GlassInnerBrush}"
+                        BorderBrush="{DynamicResource GlassStrokeBrush}"
+                        BorderThickness="1"
+                        CornerRadius="6"
+                        Visibility="Collapsed">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="20" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="&#xE721;"
+                                   FontFamily="Segoe Fluent Icons"
+                                   FontSize="12"
+                                   Foreground="{DynamicResource TextMutedBrush}"
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center" />
+                        <TextBox x:Name="FileSearchBox"
+                                 Grid.Column="1"
+                                 Height="28"
+                                 Padding="3,0"
+                                 Background="Transparent"
+                                 BorderThickness="0"
+                                 FontSize="11.5"
+                                 VerticalContentAlignment="Center" />
+                        <TextBlock Grid.Column="1"
+                                   Margin="4,0,0,0"
+                                   Text="搜索文件或文件夹"
+                                   FontSize="11.5"
+                                   Foreground="{DynamicResource TextMutedBrush}"
+                                   VerticalAlignment="Center"
+                                   IsHitTestVisible="False">
+                            <TextBlock.Style>
+                                <Style TargetType="{x:Type TextBlock}">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding Text, ElementName=FileSearchBox}" Value="">
+                                            <Setter Property="Visibility" Value="Visible" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                    </Grid>
+                </Border>
+
             <!-- 主内容区: ListBox -->
             <ListBox x:Name="IconList"
                      Grid.Row="1"
@@ -1226,6 +1284,8 @@
                     </DataTemplate>
                 </ListBox.ItemTemplate>
             </ListBox>
+
+            </Grid>
 
             <!-- 桌面便签：与文件盒共用原生桌面浮窗外壳，但拥有独立的持久化内容。 -->
             <Grid Grid.Row="1"
@@ -2542,11 +2602,33 @@
                                    Margin="1,0,0,7"
                                    FontSize="11"
                                    Foreground="{DynamicResource TextMutedBrush}" />
-                        <TextBox x:Name="FileItemRenameTextBox"
-                                 Height="28"
-                                 Padding="7,0"
-                                 VerticalContentAlignment="Center"
-                                 KeyDown="OnFileItemRenameKeyDown" />
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBox x:Name="FileItemRenameTextBox"
+                                     Height="28"
+                                     Padding="7,0"
+                                     VerticalContentAlignment="Center"
+                                     KeyDown="OnFileItemRenameKeyDown" />
+                            <Border x:Name="FileItemRenameExtensionContainer"
+                                    Grid.Column="1"
+                                    MinWidth="36"
+                                    Height="28"
+                                    Margin="4,0,0,0"
+                                    Padding="7,0"
+                                    Background="{DynamicResource AccentSoftBrush}"
+                                    BorderBrush="{DynamicResource BorderBrushSoft}"
+                                    BorderThickness="1"
+                                    CornerRadius="6">
+                                <TextBlock x:Name="FileItemRenameExtensionText"
+                                           VerticalAlignment="Center"
+                                           Foreground="{DynamicResource TextMutedBrush}"
+                                           TextTrimming="CharacterEllipsis"
+                                           ToolTip="文件后缀保持不变" />
+                            </Border>
+                        </Grid>
                         <StackPanel Orientation="Horizontal"
                                     HorizontalAlignment="Right"
                                     Margin="0,7,0,0">

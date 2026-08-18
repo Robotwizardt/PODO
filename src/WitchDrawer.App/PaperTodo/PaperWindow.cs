@@ -50,6 +50,7 @@ public sealed partial class PaperWindow : Window
     private static partial Regex TodoGlyphCleanRegex();
     private readonly PaperData _paper;
     private readonly AppController _controller;
+    private readonly INoteFileSaveDialog _noteFileSaveDialog;
     private bool _isShellBuilt;
 
     private Grid _windowHost = null!;
@@ -651,10 +652,12 @@ public sealed partial class PaperWindow : Window
     public PaperWindow(
         PaperData paper,
         AppController controller,
-        bool deferShellConstruction = false)
+        bool deferShellConstruction = false,
+        INoteFileSaveDialog? noteFileSaveDialog = null)
     {
         _paper = paper;
         _controller = controller;
+        _noteFileSaveDialog = noteFileSaveDialog ?? new NoteFileSaveDialog(this);
         _edgeCapsule.DiagnosticId =
             EdgeCapsulePerformanceDiagnostics.ShortId(paper.Id);
         _deepCapsuleContextMenuSession = new DeepCapsuleContextMenuSession(
@@ -2593,6 +2596,9 @@ public sealed partial class PaperWindow : Window
         }
         else if (_paper.Type == PaperTypes.Note)
         {
+            menu.Items.Add(MenuItem(
+                Strings.Get("MenuSaveFile"),
+                (_, _) => SaveNoteToFile()));
             menu.Items.Add(BuildPaperBodyProviderMenuItem());
             if (IsCurrentBodyProviderMarkdown)
             {

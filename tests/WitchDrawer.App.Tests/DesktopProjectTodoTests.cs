@@ -352,6 +352,25 @@ public sealed class DesktopProjectTodoTests
                     drawerService.CreateBoxAsync("项目文件夹", BoxType.ProjectFolder).GetAwaiter().GetResult(),
                     drawerService.CreateBoundBoxAsync("目标收纳盒", boundFolder).GetAwaiter().GetResult()
                 };
+                var searchableBox = boxes.Single(box => box.Type == BoxType.Normal);
+                drawerService.CreateFileSystemItemAsync(
+                        searchableBox.Id,
+                        ItemKind.File,
+                        "Project Plan.txt")
+                    .GetAwaiter()
+                    .GetResult();
+                drawerService.CreateFileSystemItemAsync(
+                        searchableBox.Id,
+                        ItemKind.Directory,
+                        "Project Archive")
+                    .GetAwaiter()
+                    .GetResult();
+                drawerService.CreateFileSystemItemAsync(
+                        searchableBox.Id,
+                        ItemKind.File,
+                        "Meeting Notes.txt")
+                    .GetAwaiter()
+                    .GetResult();
 
                 foreach (var box in boxes)
                 {
@@ -380,6 +399,49 @@ public sealed class DesktopProjectTodoTests
                         Assert.True(window.IsVisible, $"{box.Type} desktop window is not visible.");
                         Assert.True(window.ActualWidth > 0, $"{box.Type} desktop window has no width.");
                         Assert.True(window.ActualHeight > 0, $"{box.Type} desktop window has no height.");
+                        if (box.Type == BoxType.Normal)
+                        {
+                            var searchItemsList = Assert.IsType<ListBox>(window.FindName("IconList"));
+                            var searchBox = Assert.IsType<TextBox>(window.FindName("FileSearchBox"));
+                            Assert.False(searchBox.IsVisible);
+
+                            searchItemsList.RaiseEvent(new MouseWheelEventArgs(
+                                Mouse.PrimaryDevice,
+                                Environment.TickCount,
+                                Mouse.MouseWheelDeltaForOneLine)
+                            {
+                                RoutedEvent = Mouse.PreviewMouseWheelEvent,
+                                Source = searchItemsList
+                            });
+                            PumpDispatcher();
+
+                            Assert.True(searchBox.IsVisible);
+                            searchBox.Text = "project";
+                            PumpDispatcher();
+
+                            Assert.Equal(
+                                ["Project Archive", "Project Plan.txt"],
+                                searchItemsList.Items
+                                    .Cast<DrawerItemViewModel>()
+                                    .Select(item => item.DisplayName)
+                                    .OrderBy(name => name, StringComparer.Ordinal)
+                                    .ToArray());
+
+                            searchItemsList.RaiseEvent(new MouseWheelEventArgs(
+                                Mouse.PrimaryDevice,
+                                Environment.TickCount,
+                                -Mouse.MouseWheelDeltaForOneLine)
+                            {
+                                RoutedEvent = Mouse.PreviewMouseWheelEvent,
+                                Source = searchItemsList
+                            });
+                            PumpDispatcher();
+
+                            Assert.False(searchBox.IsVisible);
+                            Assert.Equal(string.Empty, searchBox.Text);
+                            Assert.Equal(3, searchItemsList.Items.Count);
+                        }
+
                         var actionsButton = Assert.IsType<Button>(
                             window.FindName("ProjectDesktopActionsButton"));
                         Assert.True(
@@ -1059,6 +1121,11 @@ public sealed class DesktopProjectTodoTests
         var imported = drawerService.ImportPathAsync(normalBox.Id, sourcePath)
             .GetAwaiter()
             .GetResult();
+        var dotFilePath = Path.Combine(root, ".gitignore");
+        File.WriteAllText(dotFilePath, "bin/");
+        var importedDotFile = drawerService.ImportPathAsync(normalBox.Id, dotFilePath)
+            .GetAwaiter()
+            .GetResult();
         var previousSynchronizationContext = SynchronizationContext.Current;
         SynchronizationContext.SetSynchronizationContext(
             new System.Windows.Threading.DispatcherSynchronizationContext(
@@ -1098,15 +1165,17 @@ public sealed class DesktopProjectTodoTests
             PumpDispatcher();
             var itemContainer = Assert.IsType<ListBoxItem>(
                 iconList.ItemContainerGenerator.ContainerFromItem(item));
-            RightClickPhysical(window, itemContainer);
-
             var contextMenu = Assert.IsType<ContextMenu>(iconList.ContextMenu);
+            iconList.SelectedItem = item;
+            contextMenu.PlacementTarget = itemContainer;
+            contextMenu.IsOpen = true;
+            PumpDispatcher();
             WaitFor(() => contextMenu.IsOpen, "The file context menu did not open after right-clicking an item.");
             Assert.Same(item, iconList.SelectedItem);
             var renameMenuItem = contextMenu.Items
                 .OfType<MenuItem>()
                 .Single(menuItem => string.Equals(menuItem.Header as string, "重命名", StringComparison.Ordinal));
-            ClickPhysical(renameMenuItem);
+            InvokeMenuItem(renameMenuItem);
 
             var renamePopup = Assert.IsType<System.Windows.Controls.Primitives.Popup>(
                 window.FindName("FileItemRenamePopup"));
@@ -1114,7 +1183,10 @@ public sealed class DesktopProjectTodoTests
                 () => renamePopup.IsOpen,
                 "Clicking Rename from the file context menu did not open the rename editor.");
             var renameTextBox = Assert.IsType<TextBox>(window.FindName("FileItemRenameTextBox"));
-            renameTextBox.Text = "右键菜单已改名.txt";
+            var renameExtension = Assert.IsType<TextBlock>(window.FindName("FileItemRenameExtensionText"));
+            Assert.Equal("右键菜单原文件", renameTextBox.Text);
+            Assert.Equal(".txt", renameExtension.Text);
+            renameTextBox.Text = "右键菜单已改名";
             var confirmRenameButton = FindVisualDescendant<Button>(
                 Assert.IsAssignableFrom<Visual>(renamePopup.Child),
                 button => string.Equals(button.Content as string, "确认", StringComparison.Ordinal));
@@ -1128,6 +1200,25 @@ public sealed class DesktopProjectTodoTests
             var renamedItem = window.ViewModel.Items.Single(candidate => candidate.Id == imported.Id);
             Assert.True(File.Exists(renamedItem.Model.EffectivePath));
             var expectedRestorePath = Assert.IsType<string>(renamedItem.Model.SourcePath);
+
+            var dotFileItem = window.ViewModel.Items.Single(candidate => candidate.Id == importedDotFile.Id);
+            iconList.SelectedItem = dotFileItem;
+            contextMenu.PlacementTarget = iconList;
+            contextMenu.IsOpen = true;
+            PumpDispatcher();
+            InvokeMenuItem(renameMenuItem);
+            WaitFor(() => renamePopup.IsOpen, "The rename editor did not open for a dot file.");
+            var renameExtensionContainer = Assert.IsType<Border>(
+                window.FindName("FileItemRenameExtensionContainer"));
+            Assert.Equal(".gitignore", renameTextBox.Text);
+            Assert.Equal(Visibility.Collapsed, renameExtensionContainer.Visibility);
+            renameTextBox.Text = ".editorconfig";
+            InvokeButton(confirmRenameButton);
+            WaitFor(
+                () => window.ViewModel.Items.Any(candidate =>
+                    candidate.Id == importedDotFile.Id
+                    && string.Equals(candidate.DisplayName, ".editorconfig", StringComparison.Ordinal)),
+                "Confirming the rename did not rename an extensionless dot file.");
 
             iconList.ScrollIntoView(renamedItem);
             window.UpdateLayout();

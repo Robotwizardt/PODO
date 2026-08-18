@@ -645,7 +645,10 @@ public sealed class DesktopBoxManager
     private void SyncBoundFolderWatchers(IReadOnlyList<WitchDrawer.Core.Models.Box> boxes)
     {
         var boundBoxes = boxes
-            .Where(box => box.Type == WitchDrawer.Core.Models.BoxType.Bound
+            .Where(box => (box.Type is WitchDrawer.Core.Models.BoxType.Normal
+                    or WitchDrawer.Core.Models.BoxType.Pixel
+                    or WitchDrawer.Core.Models.BoxType.Drawer
+                    or WitchDrawer.Core.Models.BoxType.Bound)
                 && !string.IsNullOrWhiteSpace(box.StoragePath))
             .ToDictionary(box => box.Id);
 
@@ -668,13 +671,15 @@ public sealed class DesktopBoxManager
             {
                 var watcher = new BoundFolderWatcher(box.StoragePath!);
                 watcher.Changed += (_, _) => QueueBoundFolderRefresh(box.Id);
+                watcher.Renamed += (_, eventArgs) =>
+                    QueueStorageFolderRename(box.Id, eventArgs);
                 _boundFolderWatchers.Add(box.Id, watcher);
             }
             catch (Exception exception)
             {
                 _logger.Error(
                     exception,
-                    $"Failed to watch bound folder for box {box.Id:N}: {box.StoragePath}");
+                    $"Failed to watch storage folder for box {box.Id:N}: {box.StoragePath}");
             }
         }
     }
@@ -707,7 +712,41 @@ public sealed class DesktopBoxManager
                 }
                 catch (Exception exception)
                 {
-                    _logger.Error(exception, $"Failed to refresh bound folder box {boxId:N}.");
+                    _logger.Error(exception, $"Failed to refresh storage folder box {boxId:N}.");
+                }
+            }));
+    }
+
+    private void QueueStorageFolderRename(
+        Guid boxId,
+        StorageFolderRenamedEventArgs eventArgs)
+    {
+        if (_closing)
+        {
+            return;
+        }
+
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher is null)
+        {
+            return;
+        }
+
+        dispatcher.BeginInvoke(
+            new Action(async () =>
+            {
+                try
+                {
+                    await _drawerService.SynchronizeExternalRenameAsync(
+                        boxId,
+                        eventArgs.OldPath,
+                        eventArgs.NewPath);
+                }
+                catch (Exception exception)
+                {
+                    _logger.Error(
+                        exception,
+                        $"Failed to synchronize external rename for box {boxId:N}.");
                 }
             }));
     }

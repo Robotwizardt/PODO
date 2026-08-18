@@ -142,6 +142,24 @@ PaperTodo를 수동으로 다시 여세요. 문제가 반복되면 PC를 다시 
   <data name="MenuClearDone" xml:space="preserve">
     <value>완료 항목 정리</value>
   </data>
+  <data name="MenuSaveFile" xml:space="preserve">
+    <value>파일로 저장</value>
+  </data>
+  <data name="NoteFileSaveDialogTitle" xml:space="preserve">
+    <value>노트 파일 저장</value>
+  </data>
+  <data name="NoteFileDefaultName" xml:space="preserve">
+    <value>제목 없는 노트</value>
+  </data>
+  <data name="NoteFileSaveDialogFilter" xml:space="preserve">
+    <value>Markdown 파일 (*.md)|*.md|텍스트 파일 (*.txt)|*.txt</value>
+  </data>
+  <data name="NoteFileSaveFailureTitle" xml:space="preserve">
+    <value>파일 저장 실패</value>
+  </data>
+  <data name="NoteFileSaveFailureMessage" xml:space="preserve">
+    <value>노트 파일을 저장할 수 없습니다: {0}</value>
+  </data>
   <data name="MenuCodeBlock" xml:space="preserve">
     <value>코드 블록</value>
   </data>

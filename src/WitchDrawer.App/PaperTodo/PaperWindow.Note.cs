@@ -1022,6 +1022,37 @@ public sealed partial class PaperWindow
         }
     }
 
+    private void SaveNoteToFile()
+    {
+        if (_paper.Type != PaperTypes.Note)
+        {
+            return;
+        }
+
+        try
+        {
+            CommitPendingNoteContent();
+            var suggestedFileName = NoteFileExporter.CreateSafeFileName(
+                _paper.Title,
+                Strings.Get("NoteFileDefaultName"));
+            var path = _noteFileSaveDialog.Show(suggestedFileName);
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return;
+            }
+
+            NoteFileExporter.Save(path, _paper.Content);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                Strings.Format("NoteFileSaveFailureMessage", ex.Message),
+                Strings.Get("NoteFileSaveFailureTitle"),
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+        }
+    }
+
     public void UpdateExternalMarkdownExtension()
     {
         if (_openMarkdownButton != null)

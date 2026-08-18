@@ -151,6 +151,24 @@
   <data name="MenuClearDone" xml:space="preserve">
     <value>清理已完成</value>
   </data>
+  <data name="MenuSaveFile" xml:space="preserve">
+    <value>保存文件</value>
+  </data>
+  <data name="NoteFileSaveDialogTitle" xml:space="preserve">
+    <value>保存笔记文件</value>
+  </data>
+  <data name="NoteFileDefaultName" xml:space="preserve">
+    <value>未命名笔记</value>
+  </data>
+  <data name="NoteFileSaveDialogFilter" xml:space="preserve">
+    <value>Markdown 文件 (*.md)|*.md|文本文件 (*.txt)|*.txt</value>
+  </data>
+  <data name="NoteFileSaveFailureTitle" xml:space="preserve">
+    <value>保存文件失败</value>
+  </data>
+  <data name="NoteFileSaveFailureMessage" xml:space="preserve">
+    <value>无法保存笔记文件：{0}</value>
+  </data>
   <data name="MenuCodeBlock" xml:space="preserve">
     <value>代码块</value>
   </data>

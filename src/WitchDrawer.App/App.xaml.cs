@@ -3,6 +3,7 @@ using System.IO.Pipes;
 using System.Text;
 using System.Windows;
 using System.Windows.Interop;
+using WitchDrawer.App.FileDialogAccess;
 using WitchDrawer.App.Infrastructure;
 using WitchDrawer.App.ViewModels;
 using WitchDrawer.App.Views;
@@ -31,6 +32,7 @@ public partial class App : Application
     private MainWindow? _mainWindow;
     private DesktopBoxManager? _desktopBoxManager;
     private PaperTodoHost? _paperTodoHost;
+    private FileDialogAccessHost? _fileDialogAccessHost;
     private IAppLogger? _logger;
 
     protected override async void OnStartup(StartupEventArgs e)
@@ -107,6 +109,7 @@ public partial class App : Application
             var updateService = new UpdateService(logger);
             await updateService.CleanupLegacyUpdaterArtifactsAsync();
             var quickPanelHotKeySettings = new QuickPanelHotKeySettingsStore(drawerService);
+            var fileDialogAccessSettings = new FileDialogAccessSettingsStore(drawerService);
             var boxVisualStyleStore = new BoxVisualStyleStore(drawerService, logger);
             var boxPositionLockStateStore =
                 new BoxPositionLockStateStore(drawerService, logger);
@@ -145,7 +148,8 @@ public partial class App : Application
                 boxPositionLockStateStore,
                 paths,
                 dataStorageMigrationService,
-                paperTodoHost: paperTodoHost);
+                paperTodoHost: paperTodoHost,
+                fileDialogAccessSettings: fileDialogAccessSettings);
             _desktopBoxManager = new DesktopBoxManager(
                 drawerService,
                 todoService,
@@ -161,12 +165,26 @@ public partial class App : Application
                 quickPanelHotKeySettings,
                 quickPanelHotKey,
                 paperTodoHost);
+            _fileDialogAccessHost = new FileDialogAccessHost(
+                drawerService,
+                logger,
+                fileDialogAccessSettings);
+            await _fileDialogAccessHost.InitializeAsync();
             StartSingleInstanceServer(logger);
 
             // 这些事件处理器是 async void：刷新期间的异常（如 SQLite 写入失败）会直接逃出
             // 成为进程级未处理异常，必须就地捕获记录。
             mainViewModel.BoxesChanged += async (_, _) =>
-                await GuardRefreshAsync(() => _desktopBoxManager.RefreshAsync(), "RefreshAsync", logger);
+            {
+                await GuardRefreshAsync(
+                    () => _desktopBoxManager.RefreshAsync(),
+                    "RefreshAsync",
+                    logger);
+                await GuardRefreshAsync(
+                    () => _fileDialogAccessHost.RefreshAsync(),
+                    "FileDialogAccessRefreshAsync",
+                    logger);
+            };
             mainViewModel.ItemsChanged += async (_, eventArgs) =>
                 await GuardRefreshAsync(() => _desktopBoxManager.RefreshItemsAsync(eventArgs.BoxId), "RefreshItemsAsync", logger);
             mainViewModel.ProjectManagement.ProjectChanged += async (_, boxId) =>
@@ -218,6 +236,8 @@ public partial class App : Application
         }
         catch (Exception exception)
         {
+            _fileDialogAccessHost?.Dispose();
+            _fileDialogAccessHost = null;
             _paperTodoHost?.Dispose();
             _paperTodoHost = null;
             var sb = new System.Text.StringBuilder();
@@ -449,6 +469,8 @@ public partial class App : Application
 
     private void PerformShutdown()
     {
+        _fileDialogAccessHost?.Dispose();
+        _fileDialogAccessHost = null;
         _taskbarIcon?.Dispose();
         _taskbarIcon = null;
         _paperTodoHost?.Dispose();
@@ -504,6 +526,8 @@ public partial class App : Application
         _singleInstancePipeCts?.Cancel();
         _singleInstancePipeCts?.Dispose();
         _taskbarIcon?.Dispose();
+        _fileDialogAccessHost?.Dispose();
+        _fileDialogAccessHost = null;
         _paperTodoHost?.Dispose();
         _paperTodoHost = null;
         _singleInstanceMutex?.Dispose();

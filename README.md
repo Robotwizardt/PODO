@@ -153,6 +153,12 @@ PODO 是在 WitchDrawer 基础上继续开发的衍生项目，并集成了 Pape
    - PODO 的桌面待办纸片、Markdown 笔记纸片及相关交互基于 PaperTodo 源码集成和适配。
    - PaperTodo 采用 PolyForm Noncommercial License 1.0.0 与 PaperTodo Individual Professional Use Additional Permission 1.0，完整许可见 [THIRD-PARTY/PaperTodo-LICENSE.md](THIRD-PARTY/PaperTodo-LICENSE.md)。
 
+### 设计灵感
+
+- **[PoggetCore](https://github.com/EnderMo/PoggetCore)**
+   - PODO 的“文件对话框访问窗”参考了 Pogget 产品中磁力访问窗的使用思路。
+   - PODO 使用 WinEvent、Windows 通用文件对话框协议和 UI Automation 独立实现窗口侦测、吸附与安全目录导航；未复制 Pogget 未公开的 UI 源码、品牌、图标或逐像素界面，PoggetCore 也不是 PODO 的运行依赖。
+
 ### 第三方依赖
 
 - **[Hardcodet WPF NotifyIcon](https://github.com/hardcodet/wpf-notifyicon)**

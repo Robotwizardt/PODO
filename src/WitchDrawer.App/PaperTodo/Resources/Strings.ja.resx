@@ -142,6 +142,24 @@ PaperTodo を手動でもう一度開いてください。問題が繰り返さ�
   <data name="MenuClearDone" xml:space="preserve">
     <value>完了済みを消去</value>
   </data>
+  <data name="MenuSaveFile" xml:space="preserve">
+    <value>ファイルに保存</value>
+  </data>
+  <data name="NoteFileSaveDialogTitle" xml:space="preserve">
+    <value>ノートファイルを保存</value>
+  </data>
+  <data name="NoteFileDefaultName" xml:space="preserve">
+    <value>無題のノート</value>
+  </data>
+  <data name="NoteFileSaveDialogFilter" xml:space="preserve">
+    <value>Markdown ファイル (*.md)|*.md|テキストファイル (*.txt)|*.txt</value>
+  </data>
+  <data name="NoteFileSaveFailureTitle" xml:space="preserve">
+    <value>ファイルの保存に失敗しました</value>
+  </data>
+  <data name="NoteFileSaveFailureMessage" xml:space="preserve">
+    <value>ノートファイルを保存できませんでした: {0}</value>
+  </data>
   <data name="MenuCodeBlock" xml:space="preserve">
     <value>コードブロック</value>
   </data>

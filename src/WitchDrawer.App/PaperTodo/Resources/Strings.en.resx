@@ -142,6 +142,24 @@ Error: {0}</value>
   <data name="MenuClearDone" xml:space="preserve">
     <value>Clear completed</value>
   </data>
+  <data name="MenuSaveFile" xml:space="preserve">
+    <value>Save file</value>
+  </data>
+  <data name="NoteFileSaveDialogTitle" xml:space="preserve">
+    <value>Save note file</value>
+  </data>
+  <data name="NoteFileDefaultName" xml:space="preserve">
+    <value>Untitled note</value>
+  </data>
+  <data name="NoteFileSaveDialogFilter" xml:space="preserve">
+    <value>Markdown files (*.md)|*.md|Text files (*.txt)|*.txt</value>
+  </data>
+  <data name="NoteFileSaveFailureTitle" xml:space="preserve">
+    <value>Save File Failed</value>
+  </data>
+  <data name="NoteFileSaveFailureMessage" xml:space="preserve">
+    <value>Could not save the note file: {0}</value>
+  </data>
   <data name="MenuCodeBlock" xml:space="preserve">
     <value>Code block</value>
   </data>

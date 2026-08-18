@@ -4,6 +4,7 @@ using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using CommunityToolkit.Mvvm.Messaging;
+using WitchDrawer.App.FileDialogAccess;
 using WitchDrawer.App.Infrastructure;
 using WitchDrawer.App.Messages;
 using WitchDrawer.Core;
@@ -34,6 +35,7 @@ public sealed class MainViewModel : ObservableObject
     private readonly AppPaths _appPaths;
     private readonly DataStorageMigrationService _dataStorageMigrationService;
     private readonly PaperTodoHost? _paperTodoHost;
+    private readonly FileDialogAccessSettingsStore? _fileDialogAccessSettings;
     private BoxViewModel? _selectedBox;
     private CancellationTokenSource? _itemsLoadCts;
     private int _itemsLoadVersion;
@@ -49,6 +51,8 @@ public sealed class MainViewModel : ObservableObject
     private AppTheme _currentTheme;
     private bool _isTransparentCrystalBoxes;
     private bool _launchOnStartup;
+    private bool _isFileDialogAccessEnabled = true;
+    private int _fileDialogAccessBlacklistCount;
     private bool _areDesktopIconsHidden;
     private string _updateStatusText = string.Empty;
     private bool _isCheckingUpdate;
@@ -68,7 +72,8 @@ public sealed class MainViewModel : ObservableObject
         AppPaths appPaths,
         DataStorageMigrationService dataStorageMigrationService,
         ProjectService? projectService = null,
-        PaperTodoHost? paperTodoHost = null)
+        PaperTodoHost? paperTodoHost = null,
+        FileDialogAccessSettingsStore? fileDialogAccessSettings = null)
     {
         _drawerService = drawerService;
         _todoService = todoService;
@@ -81,6 +86,15 @@ public sealed class MainViewModel : ObservableObject
         _appPaths = appPaths;
         _dataStorageMigrationService = dataStorageMigrationService;
         _paperTodoHost = paperTodoHost;
+        _fileDialogAccessSettings = fileDialogAccessSettings;
+        if (_fileDialogAccessSettings is not null)
+        {
+            _fileDialogAccessSettings.SettingsChanged += (_, settings) =>
+            {
+                IsFileDialogAccessEnabled = settings.IsEnabled;
+                FileDialogAccessBlacklistCount = settings.BlacklistedApplications.Length;
+            };
+        }
         _projectService = projectService ?? new ProjectService(todoService.Repository);
         TodoBoxDetail = new TodoBoxDetailViewModel(todoService, logger);
         TodoBoxDetail.ItemsChanged += OnTodoBoxDetailItemsChanged;
@@ -126,6 +140,9 @@ public sealed class MainViewModel : ObservableObject
         ApplyGlassThemeCommand = new AsyncRelayCommand(() => ApplyThemeAsync(AppTheme.Glass));
         ApplyCrystalThemeCommand = new AsyncRelayCommand(ApplyCrystalThemeAsync);
         ToggleLaunchOnStartupCommand = new AsyncRelayCommand(ToggleLaunchOnStartupAsync);
+        ToggleFileDialogAccessCommand = new AsyncRelayCommand(ToggleFileDialogAccessAsync);
+        ClearFileDialogAccessBlacklistCommand = new AsyncRelayCommand(
+            ClearFileDialogAccessBlacklistAsync);
         ToggleDesktopIconsCommand = new AsyncRelayCommand(ToggleDesktopIconsAsync);
         CheckForUpdateCommand = new AsyncRelayCommand(CheckForUpdateAsync);
         ShowDashboardCommand = new RelayCommand(() =>
@@ -230,6 +247,10 @@ public sealed class MainViewModel : ObservableObject
     public IAsyncRelayCommand ApplyCrystalThemeCommand { get; }
 
     public IAsyncRelayCommand ToggleLaunchOnStartupCommand { get; }
+
+    public IAsyncRelayCommand ToggleFileDialogAccessCommand { get; }
+
+    public IAsyncRelayCommand ClearFileDialogAccessBlacklistCommand { get; }
 
     public IAsyncRelayCommand ToggleDesktopIconsCommand { get; }
 
@@ -345,6 +366,28 @@ public sealed class MainViewModel : ObservableObject
         private set => SetProperty(ref _launchOnStartup, value);
     }
 
+    public bool IsFileDialogAccessEnabled
+    {
+        get => _isFileDialogAccessEnabled;
+        private set => SetProperty(ref _isFileDialogAccessEnabled, value);
+    }
+
+    public int FileDialogAccessBlacklistCount
+    {
+        get => _fileDialogAccessBlacklistCount;
+        private set
+        {
+            if (SetProperty(ref _fileDialogAccessBlacklistCount, value))
+            {
+                OnPropertyChanged(nameof(FileDialogAccessBlacklistText));
+            }
+        }
+    }
+
+    public string FileDialogAccessBlacklistText => FileDialogAccessBlacklistCount == 0
+        ? "没有已屏蔽的应用"
+        : $"已屏蔽 {FileDialogAccessBlacklistCount} 个应用";
+
     public bool AreDesktopIconsHidden
     {
         get => _areDesktopIconsHidden;
@@ -424,6 +467,12 @@ public sealed class MainViewModel : ObservableObject
             await SelectBoxAsync(Boxes.FirstOrDefault(box => box.Id == existingSelection) ?? Boxes.FirstOrDefault());
 
             LaunchOnStartup = ReadStartupRegistry();
+            if (_fileDialogAccessSettings is not null)
+            {
+                var accessSettings = await _fileDialogAccessSettings.LoadAsync();
+                IsFileDialogAccessEnabled = accessSettings.IsEnabled;
+                FileDialogAccessBlacklistCount = accessSettings.BlacklistedApplications.Length;
+            }
             AreDesktopIconsHidden = DesktopIconVisibility.IsHidden();
             await RestoreCrystalBoxTransparencyAsync();
 
@@ -1395,6 +1444,50 @@ public sealed class MainViewModel : ObservableObject
         {
             _logger.Error(exception, "Failed to toggle startup registry key.");
             StatusText = exception.Message;
+        }
+    }
+
+    private async Task ToggleFileDialogAccessAsync()
+    {
+        if (_fileDialogAccessSettings is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var settings = await _fileDialogAccessSettings.LoadAsync();
+            settings = settings with { IsEnabled = !settings.IsEnabled };
+            await _fileDialogAccessSettings.SaveAsync(settings);
+            StatusText = settings.IsEnabled
+                ? "已开启文件对话框访问窗"
+                : "已关闭文件对话框访问窗";
+        }
+        catch (Exception exception)
+        {
+            _logger.Error(exception, "Failed to toggle file dialog access window.");
+            StatusText = "无法更新文件对话框访问窗设置";
+        }
+    }
+
+    private async Task ClearFileDialogAccessBlacklistAsync()
+    {
+        if (_fileDialogAccessSettings is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var settings = await _fileDialogAccessSettings.LoadAsync();
+            await _fileDialogAccessSettings.SaveAsync(
+                settings with { BlacklistedApplications = [] });
+            StatusText = "已清空文件对话框访问窗应用黑名单";
+        }
+        catch (Exception exception)
+        {
+            _logger.Error(exception, "Failed to clear file dialog access blacklist.");
+            StatusText = "无法清空应用黑名单";
         }
     }
 

@@ -137,6 +137,8 @@ public sealed class PaperTodoHost : IDisposable, IDesktopPaperService, IProjectT
         return true;
     }
 
+    public bool ArchivePaper(string paperId) => ArchivePapers([paperId]).Count > 0;
+
     public bool DeletePaper(string paperId)
     {
         if (_controller is not { IsRunning: true } controller
@@ -211,6 +213,14 @@ public sealed class PaperTodoHost : IDisposable, IDesktopPaperService, IProjectT
             paperId,
             bounds,
             isVisible) == true;
+
+    public bool TryOffsetProjectAttachmentPresentation(
+        string paperId,
+        double deltaLeft,
+        double deltaTop) => _controller?.TryOffsetProjectAttachmentPresentation(
+            paperId,
+            deltaLeft,
+            deltaTop) == true;
 
     public int GetUnfinishedTodoCount(string paperId) =>
         _controller?.GetUnfinishedTodoCount(paperId) ?? 0;

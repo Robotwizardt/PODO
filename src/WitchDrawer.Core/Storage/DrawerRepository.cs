@@ -683,7 +683,7 @@ public sealed class DrawerRepository
         Guid itemId,
         string displayName,
         string? sourcePath,
-        string storedPath,
+        string? storedPath,
         DateTimeOffset updatedAt,
         CancellationToken cancellationToken = default)
     {
@@ -703,7 +703,7 @@ public sealed class DrawerRepository
         command.Parameters.AddWithValue("$id", itemId.ToString());
         command.Parameters.AddWithValue("$displayName", displayName);
         command.Parameters.AddWithValue("$sourcePath", (object?)sourcePath ?? DBNull.Value);
-        command.Parameters.AddWithValue("$storedPath", storedPath);
+        command.Parameters.AddWithValue("$storedPath", (object?)storedPath ?? DBNull.Value);
         command.Parameters.AddWithValue("$updatedAt", ToDb(updatedAt));
 
         if (await command.ExecuteNonQueryAsync(cancellationToken) != 1)

@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Collections.Specialized;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
@@ -22,6 +23,10 @@ public partial class DesktopBoxWindow : Window
     private const string InternalProjectFolderMemberDragFormat = "WitchDrawer.ProjectFolderMember";
     private const double DrawerPopupGap = 8;
     private const double DrawerPopupCollisionPadding = 4;
+    private const int WmEnterSizeMove = 0x0231;
+    private const int WmSizing = 0x0214;
+    private const int WmExitSizeMove = 0x0232;
+    private const double NativeResizeBorderThickness = 8;
 
     private static readonly HashSet<Guid> CompletedInternalDragIds = [];
     private static readonly HashSet<Guid> CompletedInternalItemIds = [];
@@ -38,6 +43,7 @@ public partial class DesktopBoxWindow : Window
     private Func<Guid, Task>? _togglePositionLockCallback;
     private Func<Guid, Task>? _toggleTitleVisibilityCallback;
     private Func<Guid, Task>? _deleteBoxCallback;
+    private Func<Guid, BoxWindowSizeState, Task>? _windowSizeChangedCallback;
     private Func<Guid, Task>? _returnProjectToFolderCallback;
     private Func<Guid, ProjectFolderDragOutcome, Task>? _projectFolderMemberDraggedOutCallback;
     private Func<Guid, Guid, Task>? _projectFolderMemberReorderedCallback;
@@ -53,6 +59,14 @@ public partial class DesktopBoxWindow : Window
     private bool _suppressDrawerItemClick;
     private Point? _projectFolderMemberDragStartPoint;
     private ProjectFolderMemberViewModel? _projectFolderMemberDragSource;
+    private bool _hasManualWindowSize;
+    private bool _nativeMoveSizeInProgress;
+    private bool _nativeResizeInProgress;
+    private bool _convertedAutoSizeForNativeResize;
+    private bool _gridReflowQueued;
+    private bool _manualWindowSizeLayoutResyncQueued;
+    private double _nativeMoveSizeStartWidth;
+    private double _nativeMoveSizeStartHeight;
 
     internal sealed class DesktopBoxDragPayload(Guid dragId, Guid itemId, Guid sourceBoxId)
     {
@@ -92,6 +106,7 @@ public partial class DesktopBoxWindow : Window
         FileSearchBox.TextChanged += OnFileSearchTextChanged;
         SourceInitialized += OnSourceInitialized;
         Loaded += OnLoaded;
+        IsVisibleChanged += OnIsVisibleChanged;
         DpiChanged += OnDpiChanged;
         SizeChanged += OnWindowSizeChanged;
         AppThemeManager.ThemeChanged += OnThemeChanged;
@@ -99,6 +114,8 @@ public partial class DesktopBoxWindow : Window
         Activated += OnWindowActivated;
         Deactivated += OnWindowDeactivated;
         StateChanged += OnWindowStateChanged;
+        ViewModel.Items.CollectionChanged += OnItemsCollectionChanged;
+        ViewModel.LayoutSettings.PropertyChanged += OnLayoutSettingsPropertyChanged;
         // Desktop boxes often stay non-activated (ShowActivated=false + HWND_BOTTOM/NOACTIVATE).
         // Window.Deactivated therefore never runs after an external drop selection; clear when
         // the whole app loses foreground so a desktop click removes the selected-item chrome.
@@ -254,6 +271,63 @@ public partial class DesktopBoxWindow : Window
     public void SetPositionChangedCallback(Func<Guid, Point?, bool, Task> callback)
     {
         _positionChangedCallback = callback;
+    }
+
+    public void SetWindowSizeChangedCallback(Func<Guid, BoxWindowSizeState, Task>? callback)
+    {
+        _windowSizeChangedCallback = callback;
+    }
+
+    /// <summary>
+    /// Applies a previously saved manual size. With no saved size the window stays
+    /// SizeToContent-based until the user starts a native resize operation.
+    /// </summary>
+    public void ApplySavedWindowSize(BoxWindowSizeState? size)
+    {
+        if (size is null)
+        {
+            _hasManualWindowSize = false;
+            SizeToContent = SizeToContent.WidthAndHeight;
+            ClearValue(WidthProperty);
+            ClearValue(HeightProperty);
+            return;
+        }
+
+        var normalized = BoxWindowSizeState.Normalize(size.Width, size.Height);
+        _hasManualWindowSize = true;
+        SizeToContent = SizeToContent.Manual;
+        Width = normalized.Width;
+        Height = normalized.Height;
+    }
+
+    internal BoxWindowSizeState? GetManualWindowSizeState() =>
+        _hasManualWindowSize
+            ? BoxWindowSizeState.Normalize(GetCurrentWindowWidth(), GetCurrentWindowHeight())
+            : null;
+
+    internal static bool IsResizeBorderPoint(
+        Point point,
+        double windowWidth,
+        double windowHeight,
+        double borderThickness = NativeResizeBorderThickness)
+    {
+        if (!double.IsFinite(windowWidth)
+            || !double.IsFinite(windowHeight)
+            || windowWidth <= 0
+            || windowHeight <= 0
+            || borderThickness <= 0)
+        {
+            return false;
+        }
+
+        return point.X >= 0
+            && point.Y >= 0
+            && point.X <= windowWidth
+            && point.Y <= windowHeight
+            && (point.X <= borderThickness
+                || point.Y <= borderThickness
+                || point.X >= windowWidth - borderThickness
+                || point.Y >= windowHeight - borderThickness);
     }
 
     public void SetProjectBoxActionsCallbacks(
@@ -438,7 +512,7 @@ public partial class DesktopBoxWindow : Window
     private void PrepareDrawerSecondaryPopupForOpen()
     {
         DrawerSecondaryPopupRoot.BeginAnimation(OpacityProperty, null);
-        DrawerSecondaryPopupRoot.Opacity = 0;
+        DrawerSecondaryPopupRoot.Opacity = WindowMotion.AreAnimationsEnabled ? 0 : 1;
         PrepareDrawerPopupScaleForPlacement(DrawerSecondaryPopupScale);
     }
 
@@ -506,17 +580,32 @@ public partial class DesktopBoxWindow : Window
     /// </summary>
     internal void ResyncSizeToContent()
     {
-        if (SizeToContent != SizeToContent.Manual)
+        if (_hasManualWindowSize || SizeToContent == SizeToContent.Manual)
         {
-            InvalidateMeasure();
+            return;
         }
+
+        InvalidateMeasure();
     }
 
     private Thickness VisibleBoundsMargin =>
         ViewModel.IsProjectBox ? new Thickness(6) : WindowBorder.Margin;
 
-    internal Rect GetVisibleBounds() =>
-        ComputeVisibleBounds(Left, Top, ActualWidth, ActualHeight, VisibleBoundsMargin);
+    internal Rect GetVisibleBounds()
+    {
+        var width = _hasManualWindowSize || SizeToContent == SizeToContent.Manual
+            ? GetValidManualDimension(Width, ActualWidth)
+            : ActualWidth;
+        var height = _hasManualWindowSize || SizeToContent == SizeToContent.Manual
+            ? GetValidManualDimension(Height, ActualHeight)
+            : ActualHeight;
+        return ComputeVisibleBounds(Left, Top, width, height, VisibleBoundsMargin);
+    }
+
+    private static double GetValidManualDimension(double requested, double actual) =>
+        double.IsFinite(requested) && requested > 0
+            ? requested
+            : actual;
 
     internal bool TryGetCursorScreenPosition(out Point position)
     {
@@ -545,12 +634,12 @@ public partial class DesktopBoxWindow : Window
 
     /// <summary>
     /// SizeToContent 窗口以左上角为锚点随内容向右下生长。内容尺寸变化（切换图标预设、
-    /// 固定格数、增删项目）可能把右/下边缘推出工作区——表现为盒子边缘被屏幕"吞掉"。
+    /// 增删项目）可能把右/下边缘推出工作区——表现为盒子边缘被屏幕"吞掉"。
     /// 尺寸变化后把可视区域钳回工作区；只做显示性校正，不写回已保存位置。
     /// </summary>
     private void OnWindowSizeChanged(object sender, SizeChangedEventArgs e)
     {
-        if (!IsVisible || e.PreviousSize == e.NewSize)
+        if (_nativeResizeInProgress || !IsVisible || e.PreviousSize == e.NewSize)
         {
             return;
         }
@@ -582,6 +671,88 @@ public partial class DesktopBoxWindow : Window
         {
             MoveToVisibleOrigin(visibleLeft, visibleTop);
         }
+
+        QueueGridReflow();
+    }
+
+    private double GetCurrentWindowWidth() => GetCurrentWindowDimension(
+        ActualWidth,
+        Width,
+        DesiredSize.Width,
+        BoxWindowSizeState.MinimumWidth);
+
+    private double GetCurrentWindowHeight() => GetCurrentWindowDimension(
+        ActualHeight,
+        Height,
+        DesiredSize.Height,
+        BoxWindowSizeState.MinimumHeight);
+
+    private static double GetCurrentWindowDimension(
+        double actual,
+        double requested,
+        double desired,
+        double fallback)
+    {
+        if (double.IsFinite(actual) && actual > 0)
+        {
+            return actual;
+        }
+
+        if (double.IsFinite(requested) && requested > 0)
+        {
+            return requested;
+        }
+
+        if (double.IsFinite(desired) && desired > 0)
+        {
+            return desired;
+        }
+
+        return fallback;
+    }
+
+    private void OnItemsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        QueueGridReflow();
+    }
+
+    private void OnLayoutSettingsPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(DesktopBoxLayoutSettings.ItemSlotWidth)
+            or nameof(DesktopBoxLayoutSettings.ItemSlotHeight)
+            or nameof(DesktopBoxLayoutSettings.CurrentPreset))
+        {
+            QueueGridReflow();
+        }
+    }
+
+    private void QueueGridReflow()
+    {
+        if (_gridReflowQueued || Dispatcher.HasShutdownStarted)
+        {
+            return;
+        }
+
+        _gridReflowQueued = true;
+        Dispatcher.BeginInvoke(
+            DispatcherPriority.Loaded,
+            new Action(() =>
+            {
+                _gridReflowQueued = false;
+                if (_forceClose || !IsVisible || !IconList.IsVisible)
+                {
+                    return;
+                }
+
+                UpdateLayout();
+                var availableWidth = IconList.ActualWidth
+                    - IconList.Padding.Left
+                    - IconList.Padding.Right;
+                if (ViewModel.ReflowItemsForAvailableWidth(availableWidth))
+                {
+                    UpdateLayout();
+                }
+            }));
     }
 
     internal static Rect ComputeVisibleBounds(
@@ -617,6 +788,18 @@ public partial class DesktopBoxWindow : Window
             DispatcherPriority.Loaded,
             () =>
             {
+                if (!WindowMotion.AreAnimationsEnabled)
+                {
+                    DrawerSecondaryPopupScale.BeginAnimation(ScaleTransform.ScaleXProperty, null);
+                    DrawerSecondaryPopupScale.BeginAnimation(ScaleTransform.ScaleYProperty, null);
+                    DrawerSecondaryPopupScale.ScaleX = 1;
+                    DrawerSecondaryPopupScale.ScaleY = 1;
+                    DrawerSecondaryPopupRoot.BeginAnimation(OpacityProperty, null);
+                    DrawerSecondaryPopupRoot.Opacity = 1;
+                    DrawerSecondaryPopupRoot.CacheMode = null;
+                    return;
+                }
+
                 var initialScaleX = Math.Clamp(
                     ViewModel.LayoutSettings.DrawerPrimaryIconFrameSize
                         / Math.Max(1, DrawerSecondaryPopupRoot.ActualWidth),
@@ -714,7 +897,12 @@ public partial class DesktopBoxWindow : Window
             || e.LeftButton != MouseButtonState.Pressed
             || e.OriginalSource is not DependencyObject source
             || FindVisualAncestor<Button>(source) is not null
-            || FindVisualAncestor<Thumb>(source) is not null)
+            || FindVisualAncestor<Thumb>(source) is not null
+            || _nativeResizeInProgress
+            || IsResizeBorderPoint(
+                e.GetPosition(this),
+                GetCurrentWindowWidth(),
+                GetCurrentWindowHeight()))
         {
             return;
         }
@@ -947,15 +1135,20 @@ public partial class DesktopBoxWindow : Window
     {
         SourceInitialized -= OnSourceInitialized;
         Loaded -= OnLoaded;
+        IsVisibleChanged -= OnIsVisibleChanged;
         DpiChanged -= OnDpiChanged;
+        SizeChanged -= OnWindowSizeChanged;
         AppThemeManager.ThemeChanged -= OnThemeChanged;
         AppThemeManager.CrystalBoxTransparencyChanged -= OnCrystalBoxTransparencyChanged;
         Activated -= OnWindowActivated;
         Deactivated -= OnWindowDeactivated;
         StateChanged -= OnWindowStateChanged;
+        ViewModel.Items.CollectionChanged -= OnItemsCollectionChanged;
+        ViewModel.LayoutSettings.PropertyChanged -= OnLayoutSettingsPropertyChanged;
         _source?.RemoveHook(WindowMessageHook);
         _source = null;
         _nativeWindow = null;
+        _windowSizeChangedCallback = null;
         if (Application.Current is not null)
         {
             Application.Current.Deactivated -= OnApplicationDeactivated;
@@ -981,6 +1174,19 @@ public partial class DesktopBoxWindow : Window
         nint longParameter,
         ref bool handled)
     {
+        switch (message)
+        {
+            case WmEnterSizeMove:
+                BeginNativeMoveSize();
+                break;
+            case WmSizing:
+                BeginNativeResize();
+                break;
+            case WmExitSizeMove:
+                CompleteNativeMoveSize();
+                break;
+        }
+
         if (DesktopToolWindow.IsMinimizeSystemCommand(message, wordParameter))
         {
             // Win+D / Show Desktop normally minimizes top-level windows. A desktop
@@ -989,6 +1195,107 @@ public partial class DesktopBoxWindow : Window
         }
 
         return nint.Zero;
+    }
+
+    private void BeginNativeMoveSize()
+    {
+        _nativeMoveSizeInProgress = true;
+        _nativeResizeInProgress = false;
+        _convertedAutoSizeForNativeResize = false;
+        _nativeMoveSizeStartWidth = GetCurrentWindowWidth();
+        _nativeMoveSizeStartHeight = GetCurrentWindowHeight();
+    }
+
+    private void BeginNativeResize()
+    {
+        if (!_nativeMoveSizeInProgress)
+        {
+            BeginNativeMoveSize();
+        }
+
+        _nativeResizeInProgress = true;
+        if (SizeToContent == SizeToContent.Manual)
+        {
+            return;
+        }
+
+        // SizeToContent is ideal for the first display, but it must be frozen
+        // before Windows starts applying the user's edge drag. Otherwise WPF
+        // can immediately put the window back to its content size.
+        var currentWidth = GetCurrentWindowWidth();
+        var currentHeight = GetCurrentWindowHeight();
+        _convertedAutoSizeForNativeResize = true;
+        SizeToContent = SizeToContent.Manual;
+        Width = currentWidth;
+        Height = currentHeight;
+    }
+
+    private void CompleteNativeMoveSize()
+    {
+        if (!_nativeMoveSizeInProgress)
+        {
+            return;
+        }
+
+        var wasResize = _nativeResizeInProgress;
+        var wasAutoSize = _convertedAutoSizeForNativeResize;
+        var currentWidth = GetCurrentWindowWidth();
+        var currentHeight = GetCurrentWindowHeight();
+        var changed = wasResize
+            && (Math.Abs(currentWidth - _nativeMoveSizeStartWidth) > 0.5
+                || Math.Abs(currentHeight - _nativeMoveSizeStartHeight) > 0.5);
+
+        if (wasAutoSize && !changed)
+        {
+            // Esc/cancelled resize: return to the original content-driven
+            // behavior instead of making an unchanged size permanent.
+            _hasManualWindowSize = false;
+            SizeToContent = SizeToContent.WidthAndHeight;
+            ClearValue(WidthProperty);
+            ClearValue(HeightProperty);
+        }
+        else if (wasResize)
+        {
+            _hasManualWindowSize = true;
+            SizeToContent = SizeToContent.Manual;
+        }
+
+        _nativeMoveSizeInProgress = false;
+        _nativeResizeInProgress = false;
+        _convertedAutoSizeForNativeResize = false;
+
+        if (changed)
+        {
+            QueueGridReflow();
+            NotifyWindowSizeChanged();
+        }
+    }
+
+    private void NotifyWindowSizeChanged()
+    {
+        if (_windowSizeChangedCallback is null)
+        {
+            return;
+        }
+
+        _ = NotifyWindowSizeChangedAsync(
+            _windowSizeChangedCallback,
+            BoxWindowSizeState.Normalize(GetCurrentWindowWidth(), GetCurrentWindowHeight()));
+    }
+
+    private async Task NotifyWindowSizeChangedAsync(
+        Func<Guid, BoxWindowSizeState, Task> callback,
+        BoxWindowSizeState size)
+    {
+        try
+        {
+            await callback(ViewModel.BoxId, size);
+        }
+        catch (Exception)
+        {
+            // The manager owns persistence and logs failures. A WPF message hook
+            // must never surface an unobserved exception onto the dispatcher.
+        }
     }
 
     private void OnWindowStateChanged(object? sender, EventArgs e)
@@ -1054,6 +1361,46 @@ public partial class DesktopBoxWindow : Window
             ActiveItemsList.Focus();
         }
         QueueSendToBottom();
+        QueueGridReflow();
+    }
+
+    private void OnIsVisibleChanged(object sender, DependencyPropertyChangedEventArgs e)
+    {
+        if (e.NewValue is true)
+        {
+            QueueManualWindowSizeLayoutResync();
+        }
+    }
+
+    private void QueueManualWindowSizeLayoutResync()
+    {
+        if (_manualWindowSizeLayoutResyncQueued || Dispatcher.HasShutdownStarted)
+        {
+            return;
+        }
+
+        _manualWindowSizeLayoutResyncQueued = true;
+        Dispatcher.BeginInvoke(
+            DispatcherPriority.Loaded,
+            new Action(() =>
+            {
+                _manualWindowSizeLayoutResyncQueued = false;
+                if (_forceClose
+                    || !IsVisible
+                    || !_hasManualWindowSize
+                    || SizeToContent != SizeToContent.Manual)
+                {
+                    return;
+                }
+
+                if (_nativeWindow?.IsAlive != true)
+                {
+                    return;
+                }
+
+                _nativeWindow.SynchronizeClientSize();
+                UpdateLayout();
+            }));
     }
 
     private void OnDpiChanged(object sender, DpiChangedEventArgs e)
@@ -1079,7 +1426,7 @@ public partial class DesktopBoxWindow : Window
     private void ApplyThemeAppearance()
     {
         AppThemeManager.ApplyDesktopBoxResources(Resources);
-        AppThemeManager.ApplyToWindow(this);
+        AppThemeManager.ApplyToWindow(this, WindowBackdropKind.None);
     }
 
     private void OnWindowActivated(object? sender, EventArgs e)
@@ -1443,6 +1790,17 @@ public partial class DesktopBoxWindow : Window
         {
             var startWidth = Math.Max(MinWidth, ActualWidth);
             var startHeight = Math.Max(MinHeight, ActualHeight);
+            var keepManualWindowSize = _hasManualWindowSize;
+
+            var modeChangeTask = useListMode
+                ? ViewModel.UseMappingListModeCommand.ExecuteAsync(null)
+                : ViewModel.UseMappingGridModeCommand.ExecuteAsync(null);
+
+            if (keepManualWindowSize)
+            {
+                await modeChangeTask;
+                return;
+            }
 
             // SizeToContent would otherwise apply the target view's desired size in one frame.
             // Freeze the current size first, then animate to the newly measured target size.
@@ -1450,11 +1808,7 @@ public partial class DesktopBoxWindow : Window
             Width = startWidth;
             Height = startHeight;
             incomingList.BeginAnimation(OpacityProperty, null);
-            incomingList.Opacity = 0;
-
-            var modeChangeTask = useListMode
-                ? ViewModel.UseMappingListModeCommand.ExecuteAsync(null)
-                : ViewModel.UseMappingGridModeCommand.ExecuteAsync(null);
+            incomingList.Opacity = WindowMotion.AreAnimationsEnabled ? 0 : 1;
 
             await Dispatcher.InvokeAsync(
                 () => { },
@@ -1464,14 +1818,18 @@ public partial class DesktopBoxWindow : Window
             var targetWidth = Math.Max(MinWidth, WindowBorder.DesiredSize.Width);
             var targetHeight = Math.Max(MinHeight, WindowBorder.DesiredSize.Height);
 
+            incomingList.BeginAnimation(OpacityProperty, null);
             incomingList.Opacity = 1;
-            incomingList.BeginAnimation(
-                OpacityProperty,
-                new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(160))
-                {
-                    BeginTime = TimeSpan.FromMilliseconds(45),
-                    EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
-                });
+            if (WindowMotion.AreAnimationsEnabled)
+            {
+                incomingList.BeginAnimation(
+                    OpacityProperty,
+                    new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(160))
+                    {
+                        BeginTime = TimeSpan.FromMilliseconds(45),
+                        EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+                    });
+            }
 
             await Task.WhenAll(
                 modeChangeTask,
@@ -1483,9 +1841,18 @@ public partial class DesktopBoxWindow : Window
             incomingList.Opacity = 1;
             BeginAnimation(WidthProperty, null);
             BeginAnimation(HeightProperty, null);
-            SizeToContent = SizeToContent.WidthAndHeight;
-            ClearValue(WidthProperty);
-            ClearValue(HeightProperty);
+            if (_hasManualWindowSize)
+            {
+                SizeToContent = SizeToContent.Manual;
+                Width = GetCurrentWindowWidth();
+                Height = GetCurrentWindowHeight();
+            }
+            else
+            {
+                SizeToContent = SizeToContent.WidthAndHeight;
+                ClearValue(WidthProperty);
+                ClearValue(HeightProperty);
+            }
             _isMappingViewTransitioning = false;
             QueueSendToBottom();
         }
@@ -1498,6 +1865,17 @@ public partial class DesktopBoxWindow : Window
         double targetHeight)
     {
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        if (!WindowMotion.AreAnimationsEnabled)
+        {
+            BeginAnimation(WidthProperty, null);
+            BeginAnimation(HeightProperty, null);
+            Width = targetWidth;
+            Height = targetHeight;
+            completion.TrySetResult();
+            return completion.Task;
+        }
+
         var duration = TimeSpan.FromMilliseconds(220);
         var easing = new CubicEase { EasingMode = EasingMode.EaseOut };
 
@@ -1538,16 +1916,16 @@ public partial class DesktopBoxWindow : Window
         if (e.Data.GetDataPresent(InternalDrawerItemDragFormat))
         {
             acceptsDrop = TryGetInternalDragPayload(e.Data, out var payload);
-            // 固定模式（硬约束）：盒已满时拒绝拖入。
-        if (acceptsDrop && !ViewModel.HasFreeSlotForDrop(
-                payload.SourceBoxId == ViewModel.BoxId ? payload.ItemId : (Guid?)null))
-        {
-            acceptsDrop = false;
-        }
-
-        // 排序模式的落点由排序键决定（盒内拖动为空操作），槽位预览会误导：
-        // 只保留盒子高亮，不显示落点框。
-        showPreview = acceptsDrop && ViewModel.IsFreeSort;
+            var targetFolder = ViewModel.SupportsFileManagement
+                ? GetFolderDropTarget(e.OriginalSource)
+                : null;
+            var movesIntoFolder = acceptsDrop
+                && targetFolder is not null
+                && payload.SourceBoxId == ViewModel.BoxId
+                && payload.ItemId != targetFolder.Id;
+            // 排序模式的落点由排序键决定（盒内拖动为空操作），槽位预览会误导：
+            // 只保留盒子高亮，不显示落点框。
+            showPreview = acceptsDrop && !movesIntoFolder && ViewModel.IsFreeSort;
             e.Effects = acceptsDrop ? DragDropEffects.Move : DragDropEffects.None;
             if (showPreview)
             {
@@ -1558,13 +1936,10 @@ public partial class DesktopBoxWindow : Window
         {
             var dropEffect = ChooseFileDropEffect(e.AllowedEffects);
             acceptsDrop = e.Data.GetDataPresent(DataFormats.FileDrop) && dropEffect != DragDropEffects.None;
-            // 固定模式（硬约束）：盒已满时拒绝拖入文件。
-            if (acceptsDrop && !ViewModel.HasFreeSlotForDrop())
-            {
-                acceptsDrop = false;
-            }
-
-            showPreview = acceptsDrop && ViewModel.IsFreeSort;
+            var targetFolder = ViewModel.SupportsFileManagement
+                ? GetFolderDropTarget(e.OriginalSource)
+                : null;
+            showPreview = acceptsDrop && targetFolder is null && ViewModel.IsFreeSort;
             e.Effects = acceptsDrop ? dropEffect : DragDropEffects.None;
             if (showPreview)
             {
@@ -1644,10 +2019,24 @@ public partial class DesktopBoxWindow : Window
             {
                 if (TryGetInternalDragPayload(e.Data, out var payload))
                 {
+                    var targetFolder = ViewModel.SupportsFileManagement
+                        ? GetFolderDropTarget(e.OriginalSource)
+                        : null;
+                    if (targetFolder is not null
+                        && payload.SourceBoxId == ViewModel.BoxId
+                        && payload.ItemId != targetFolder.Id)
+                    {
+                        e.Effects = DragDropEffects.Move;
+                        payload.WasDroppedInsideWitchDrawer = true;
+                        _ = CompleteInternalFolderDropAsync(payload, targetFolder);
+                        return;
+                    }
+
                     var slot = GetDropSlot(e, payload);
                     if (slot is null)
                     {
-                        // 固定模式盒已满：拒绝落放，不标记为内部移动，项目保留在原盒。
+                        // Keep the drop uncommitted when the active view cannot
+                        // provide a landing slot.
                         e.Effects = DragDropEffects.None;
                         return;
                     }
@@ -1665,10 +2054,26 @@ public partial class DesktopBoxWindow : Window
 
             if (e.Data.GetData(DataFormats.FileDrop) is string[] paths)
             {
+                var targetFolder = ViewModel.SupportsFileManagement
+                    ? GetFolderDropTarget(e.OriginalSource)
+                    : null;
+                if (targetFolder is not null)
+                {
+                    e.Effects = paths.Length > 0
+                        ? ChooseFileDropEffect(e.AllowedEffects)
+                        : DragDropEffects.None;
+                    var moved = await ViewModel.MovePathsIntoFolderAsync(targetFolder, paths);
+                    e.Effects = moved
+                        ? ChooseFileDropEffect(e.AllowedEffects)
+                        : DragDropEffects.None;
+                    return;
+                }
+
                 var slot = GetDropSlot(e);
                 if (slot is null)
                 {
-                    // 固定模式盒已满：拒绝导入，文件保持原样。
+                    // Keep the source files unchanged when the active view cannot
+                    // provide a landing slot.
                     e.Effects = DragDropEffects.None;
                     return;
                 }
@@ -1996,6 +2401,17 @@ public partial class DesktopBoxWindow : Window
             return;
         }
 
+        // WindowChrome owns the outer resize border. Do not let the same mouse
+        // down bubble into the whole-box DragMove path when a user is resizing.
+        if (_nativeResizeInProgress
+            || IsResizeBorderPoint(
+                e.GetPosition(this),
+                GetCurrentWindowWidth(),
+                GetCurrentWindowHeight()))
+        {
+            return;
+        }
+
         if (e.ButtonState == MouseButtonState.Pressed)
         {
             try
@@ -2069,6 +2485,38 @@ public partial class DesktopBoxWindow : Window
             FrameworkContentElement contentElement => contentElement.Parent,
             _ => LogicalTreeHelper.GetParent(current)
         };
+
+    internal static DrawerItemViewModel? GetFolderDropTarget(object? source)
+    {
+        if (source is not DependencyObject dependency)
+        {
+            return null;
+        }
+
+        for (DependencyObject? current = dependency; current is not null; current = GetDropTargetParent(current))
+        {
+            if (current is ListBoxItem
+                {
+                    DataContext: DrawerItemViewModel
+                    {
+                        Model.ItemKind: ItemKind.Directory
+                    } folder
+                })
+            {
+                return folder;
+            }
+        }
+
+        return null;
+    }
+
+    private static DependencyObject? GetDropTargetParent(DependencyObject current)
+    {
+        DependencyObject? visualParent = current is Visual
+            ? VisualTreeHelper.GetParent(current)
+            : null;
+        return visualParent ?? LogicalTreeHelper.GetParent(current);
+    }
 
     private void OnIconPreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
@@ -2151,10 +2599,7 @@ public partial class DesktopBoxWindow : Window
             Math.Max(0, itemList.ActualWidth - padding.Left - padding.Right),
             Math.Max(0, itemList.ActualHeight - padding.Top - padding.Bottom));
 
-        // 固定模式（硬约束）：盒内找不到空位时返回 null，调用方据此拒绝拖放。
-        return ViewModel.TryGetAvailableDropSlot(rawSlot.Column, rawSlot.Row, movingItemId, out var slot)
-            ? slot
-            : null;
+        return ViewModel.GetAvailableDropSlot(rawSlot.Column, rawSlot.Row, movingItemId);
     }
 
     private void ShowDropPreview(DragEventArgs e, DesktopBoxDragPayload? payload)
@@ -2169,8 +2614,6 @@ public partial class DesktopBoxWindow : Window
         var slot = GetDropSlot(e, payload);
         if (slot is null)
         {
-            // 固定模式盒已满：不显示落点预览，DragOver 已给出禁止光标。
-            ViewModel.HideDragPreview();
             return;
         }
 
@@ -2251,6 +2694,26 @@ public partial class DesktopBoxWindow : Window
             {
                 MarkDroppedInsideWitchDrawer(payload);
                 SelectItem(payload.ItemId);
+            }
+        }
+        finally
+        {
+            payload.CompleteDrop(moved);
+        }
+    }
+
+    private async Task CompleteInternalFolderDropAsync(
+        DesktopBoxDragPayload payload,
+        DrawerItemViewModel folder)
+    {
+        var moved = false;
+        try
+        {
+            moved = await ViewModel.MoveDrawerItemIntoFolderAsync(payload.ItemId, folder);
+            if (moved)
+            {
+                MarkDroppedInsideWitchDrawer(payload);
+                ClearItemSelection();
             }
         }
         finally

@@ -22,6 +22,8 @@ public sealed class DrawerItemViewModel : ObservableObject, IVirtualizingCanvasI
     private int _loadedIconPixelSize;
     private int _gridColumn;
     private int _gridRow;
+    private int _displayGridColumn;
+    private int _displayGridRow;
     private double _gridLeft;
     private double _gridTop;
     private bool _isDragSource;
@@ -45,6 +47,8 @@ public sealed class DrawerItemViewModel : ObservableObject, IVirtualizingCanvasI
         _requestedIconPixelSize = NormalizeIconPixelSize(iconPixelSize);
         _gridColumn = Math.Max(0, model.GridColumn ?? 0);
         _gridRow = Math.Max(0, model.GridRow ?? 0);
+        _displayGridColumn = _gridColumn;
+        _displayGridRow = _gridRow;
     }
 
     public DrawerItem Model { get; }
@@ -99,6 +103,10 @@ public sealed class DrawerItemViewModel : ObservableObject, IVirtualizingCanvasI
         get => _gridRow;
         private set => SetProperty(ref _gridRow, value);
     }
+
+    internal int DisplayGridColumn => _displayGridColumn;
+
+    internal int DisplayGridRow => _displayGridRow;
 
     public double GridLeft
     {
@@ -175,6 +183,28 @@ public sealed class DrawerItemViewModel : ObservableObject, IVirtualizingCanvasI
     {
         GridColumn = column;
         GridRow = row;
+        _displayGridColumn = Math.Max(0, column);
+        _displayGridRow = Math.Max(0, row);
+        UpdateCanvasPosition(layoutSettings);
+    }
+
+    internal void SetDisplayGridPosition(
+        int column,
+        int row,
+        DesktopBoxLayoutSettings layoutSettings)
+    {
+        _displayGridColumn = Math.Max(0, column);
+        _displayGridRow = Math.Max(0, row);
+        UpdateCanvasPosition(layoutSettings);
+    }
+
+    internal void SetPersistedGridPosition(
+        int column,
+        int row,
+        DesktopBoxLayoutSettings layoutSettings)
+    {
+        GridColumn = Math.Max(0, column);
+        GridRow = Math.Max(0, row);
         UpdateCanvasPosition(layoutSettings);
     }
 
@@ -187,8 +217,8 @@ public sealed class DrawerItemViewModel : ObservableObject, IVirtualizingCanvasI
 
     public void UpdateCanvasPosition(DesktopBoxLayoutSettings layoutSettings)
     {
-        GridLeft = GridColumn * layoutSettings.ItemSlotWidth + _tempOffsetX;
-        GridTop = GridRow * layoutSettings.ItemSlotHeight + _tempOffsetY;
+        GridLeft = _displayGridColumn * layoutSettings.ItemSlotWidth + _tempOffsetX;
+        GridTop = _displayGridRow * layoutSettings.ItemSlotHeight + _tempOffsetY;
     }
 
     private async Task LoadIconAsync()

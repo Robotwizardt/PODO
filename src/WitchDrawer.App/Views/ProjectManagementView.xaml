@@ -1,20 +1,10 @@
 <UserControl x:Class="WitchDrawer.App.Views.ProjectManagementView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:infrastructure="clr-namespace:WitchDrawer.App.Infrastructure"
              MinHeight="260"
              UseLayoutRounding="True"
              SnapsToDevicePixels="True">
-    <UserControl.Resources>
-        <Style x:Key="ProjectSizeModeButtonStyle"
-               TargetType="{x:Type Button}"
-               BasedOn="{StaticResource GhostButtonStyle}">
-            <Setter Property="Padding" Value="9,4" />
-            <Setter Property="Margin" Value="0" />
-            <Setter Property="Background" Value="Transparent" />
-            <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="FontSize" Value="10.5" />
-        </Style>
-    </UserControl.Resources>
     <Grid x:Name="Root">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -31,10 +21,11 @@
             <StackPanel>
                 <TextBlock Text="项目收纳盒"
                            Foreground="{DynamicResource TextMutedBrush}"
-                           FontSize="11"
+                           FontSize="{DynamicResource CaptionFontSize}"
                            FontWeight="SemiBold" />
                 <TextBlock Text="{Binding ProjectName}"
                            Foreground="{DynamicResource TextPrimaryBrush}"
+                           FontFamily="{DynamicResource AppDisplayFontFamily}"
                            FontSize="22"
                            FontWeight="SemiBold"
                            Margin="0,2,0,0"
@@ -47,9 +38,10 @@
                         Click="OnRenameProjectClicked"
                         Width="28"
                         Height="28"
-                        Padding="0"
-                        Style="{StaticResource GhostButtonStyle}"
-                        ToolTip="重命名项目收纳盒">
+                         Padding="0"
+                         Style="{StaticResource GhostButtonStyle}"
+                         ToolTip="重命名项目收纳盒"
+                         AutomationProperties.Name="重命名项目收纳盒">
                     <TextBlock Text="&#xE70F;"
                                FontFamily="Segoe Fluent Icons"
                                FontSize="13" />
@@ -59,8 +51,9 @@
                         Height="28"
                         Padding="0"
                         Margin="3,0,0,0"
-                        Style="{StaticResource GhostButtonStyle}"
-                        ToolTip="{Binding DataContext.SelectedBox.PositionLockButtonToolTip, RelativeSource={RelativeSource AncestorType={x:Type Window}}}">
+                         Style="{StaticResource GhostButtonStyle}"
+                         ToolTip="{Binding DataContext.SelectedBox.PositionLockButtonToolTip, RelativeSource={RelativeSource AncestorType={x:Type Window}}}"
+                         AutomationProperties.Name="切换项目收纳盒位置锁定">
                     <TextBlock Text="&#xE72E;"
                                FontFamily="Segoe Fluent Icons"
                                FontSize="13" />
@@ -70,9 +63,10 @@
                             Click="OnOpenProjectBoxActionsMenu"
                             Width="28"
                             Height="28"
-                            Padding="0"
-                            Style="{StaticResource GhostButtonStyle}"
-                            ToolTip="更多项目收纳盒操作">
+                             Padding="0"
+                             Style="{StaticResource GhostButtonStyle}"
+                             ToolTip="更多项目收纳盒操作"
+                             AutomationProperties.Name="更多项目收纳盒操作">
                         <TextBlock Text="&#xE712;"
                                    FontFamily="Segoe Fluent Icons"
                                    FontSize="14" />
@@ -85,14 +79,14 @@
                            DataContext="{Binding DataContext, RelativeSource={RelativeSource AncestorType={x:Type Window}}}"
                            AllowsTransparency="True"
                            StaysOpen="True"
-                           PopupAnimation="Fade">
+                           PopupAnimation="{x:Static infrastructure:WindowMotion.PopupAnimation}">
                         <Border Margin="8"
                                 Padding="5"
                                 MinWidth="178"
-                                Background="{DynamicResource PanelBrush}"
-                                BorderBrush="{DynamicResource BorderBrushSoft}"
+                                 Background="{DynamicResource AcrylicSurfaceBrush}"
+                                 BorderBrush="{DynamicResource AcrylicStrokeBrush}"
                                 BorderThickness="1"
-                                CornerRadius="8">
+                                 CornerRadius="{DynamicResource PopupCornerRadius}">
                             <StackPanel>
                                 <Button Click="OnShowProjectDesktopBoxClicked"
                                         Style="{StaticResource GhostButtonStyle}"
@@ -182,10 +176,10 @@
         </Grid>
 
         <Border Grid.Row="1"
-                Background="{DynamicResource PanelBrush}"
-                BorderBrush="{DynamicResource BorderBrushSoft}"
+                 Background="{DynamicResource GlassSurfaceBrush}"
+                 BorderBrush="{DynamicResource GlassStrokeBrush}"
                 BorderThickness="1"
-                CornerRadius="8"
+                 CornerRadius="{DynamicResource SurfaceCornerRadius}"
                 Padding="10"
                 Margin="0,0,0,10">
             <Grid>
@@ -197,7 +191,7 @@
                 </Grid.ColumnDefinitions>
                 <TextBlock Text="阶段"
                            Foreground="{DynamicResource TextMutedBrush}"
-                           FontSize="11"
+                            FontSize="{DynamicResource CaptionFontSize}"
                            VerticalAlignment="Center"
                            Margin="0,0,8,0" />
                 <ComboBox Grid.Column="1"
@@ -207,129 +201,48 @@
                           SelectedValue="{Binding SelectedStage, Mode=TwoWay}"
                           SelectionChanged="OnStageSelectionChanged"
                           Height="28"
-                          ToolTip="项目阶段" />
+                           ToolTip="项目阶段"
+                           AutomationProperties.Name="项目阶段" />
                 <TextBlock Grid.Column="2"
                            Text="{Binding ModuleCount, StringFormat=共 {0} 个模块}"
                            Foreground="{DynamicResource TextMutedBrush}"
-                           FontSize="11"
+                            FontSize="{DynamicResource CaptionFontSize}"
                            VerticalAlignment="Center"
                            Margin="12,0,0,0" />
             </Grid>
         </Border>
 
         <Border Grid.Row="2"
-                Background="{DynamicResource PanelBrush}"
-                BorderBrush="{DynamicResource BorderBrushSoft}"
+                 Background="{DynamicResource GlassSurfaceBrush}"
+                 BorderBrush="{DynamicResource GlassStrokeBrush}"
                 BorderThickness="1"
-                CornerRadius="8"
+                 CornerRadius="{DynamicResource SurfaceCornerRadius}"
                 Padding="10"
                 Margin="0,0,0,10">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <TextBlock Text="项目尺寸"
                            Foreground="{DynamicResource TextMutedBrush}"
-                           FontSize="11"
+                            FontSize="{DynamicResource CaptionFontSize}"
                            VerticalAlignment="Center"
                            Margin="0,0,10,0" />
-                <Border Grid.Column="1"
-                        Background="{DynamicResource PanelAltBrush}"
-                        BorderBrush="{DynamicResource BorderBrushSoft}"
-                        BorderThickness="1"
-                        CornerRadius="6"
-                        HorizontalAlignment="Left">
-                    <StackPanel Orientation="Horizontal">
-                        <Button Content="紧凑"
-                                 Command="{Binding DataContext.BoxSizeSettings.UseAdaptiveModeCommand, RelativeSource={RelativeSource AncestorType={x:Type Window}}}">
-                            <Button.Style>
-                                <Style TargetType="{x:Type Button}" BasedOn="{StaticResource ProjectSizeModeButtonStyle}">
-                                    <Style.Triggers>
-                                        <DataTrigger Binding="{Binding DataContext.BoxSizeSettings.IsAdaptiveMode, RelativeSource={RelativeSource AncestorType={x:Type Window}}}" Value="True">
-                                            <Setter Property="Background" Value="{DynamicResource AccentSoftBrush}" />
-                                            <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
-                                        </DataTrigger>
-                                    </Style.Triggers>
-                                </Style>
-                            </Button.Style>
-                        </Button>
-                        <Button Content="自定义"
-                                Command="{Binding DataContext.BoxSizeSettings.UseFixedModeCommand, RelativeSource={RelativeSource AncestorType={x:Type Window}}}">
-                            <Button.Style>
-                                <Style TargetType="{x:Type Button}" BasedOn="{StaticResource ProjectSizeModeButtonStyle}">
-                                    <Style.Triggers>
-                                        <DataTrigger Binding="{Binding DataContext.BoxSizeSettings.IsFixedMode, RelativeSource={RelativeSource AncestorType={x:Type Window}}}" Value="True">
-                                            <Setter Property="Background" Value="{DynamicResource AccentSoftBrush}" />
-                                            <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
-                                        </DataTrigger>
-                                    </Style.Triggers>
-                                </Style>
-                            </Button.Style>
-                        </Button>
-                    </StackPanel>
-                </Border>
-                <StackPanel Grid.Column="2"
-                            Orientation="Horizontal"
-                            VerticalAlignment="Center"
-                            Visibility="{Binding DataContext.BoxSizeSettings.IsFixedMode, RelativeSource={RelativeSource AncestorType={x:Type Window}}, Converter={StaticResource BooleanToVisibilityConverter}}">
-                    <Button Content="−"
-                            Command="{Binding DataContext.BoxSizeSettings.DecreaseColumnsCommand, RelativeSource={RelativeSource AncestorType={x:Type Window}}}"
-                            Style="{StaticResource GhostButtonStyle}"
-                            Width="24"
-                            Height="24"
-                            Padding="0"
-                            ToolTip="缩小项目宽度" />
-                    <TextBlock Text="{Binding DataContext.BoxSizeSettings.FixedColumns, RelativeSource={RelativeSource AncestorType={x:Type Window}}}"
-                               Width="18"
-                               Foreground="{DynamicResource TextPrimaryBrush}"
-                               FontSize="11"
-                               FontWeight="SemiBold"
-                               VerticalAlignment="Center"
-                               TextAlignment="Center" />
-                    <Button Content="＋"
-                            Command="{Binding DataContext.BoxSizeSettings.IncreaseColumnsCommand, RelativeSource={RelativeSource AncestorType={x:Type Window}}}"
-                            Style="{StaticResource GhostButtonStyle}"
-                            Width="24"
-                            Height="24"
-                            Padding="0"
-                            ToolTip="加宽项目收纳盒" />
-                    <TextBlock Text="×"
-                               Foreground="{DynamicResource TextMutedBrush}"
-                               FontSize="11"
-                               Margin="3,0"
-                               VerticalAlignment="Center" />
-                    <Button Content="−"
-                            Command="{Binding DataContext.BoxSizeSettings.DecreaseRowsCommand, RelativeSource={RelativeSource AncestorType={x:Type Window}}}"
-                            Style="{StaticResource GhostButtonStyle}"
-                            Width="24"
-                            Height="24"
-                            Padding="0"
-                            ToolTip="降低模块清单高度" />
-                    <TextBlock Text="{Binding DataContext.BoxSizeSettings.FixedRows, RelativeSource={RelativeSource AncestorType={x:Type Window}}}"
-                               Width="18"
-                               Foreground="{DynamicResource TextPrimaryBrush}"
-                               FontSize="11"
-                               FontWeight="SemiBold"
-                               VerticalAlignment="Center"
-                               TextAlignment="Center" />
-                    <Button Content="＋"
-                            Command="{Binding DataContext.BoxSizeSettings.IncreaseRowsCommand, RelativeSource={RelativeSource AncestorType={x:Type Window}}}"
-                            Style="{StaticResource GhostButtonStyle}"
-                            Width="24"
-                            Height="24"
-                            Padding="0"
-                            ToolTip="增加模块清单高度" />
-                </StackPanel>
+                <TextBlock Grid.Column="1"
+                           Text="默认随内容自适应；在桌面窗口直接拖动边缘即可调整大小。"
+                           Foreground="{DynamicResource TextMutedBrush}"
+                           FontSize="{DynamicResource CaptionFontSize}"
+                           TextWrapping="Wrap"
+                           VerticalAlignment="Center" />
             </Grid>
         </Border>
 
         <Border Grid.Row="3"
-                Background="{DynamicResource PanelBrush}"
-                BorderBrush="{DynamicResource BorderBrushSoft}"
+                Background="{DynamicResource GlassSurfaceBrush}"
+                BorderBrush="{DynamicResource GlassStrokeBrush}"
                 BorderThickness="1"
-                CornerRadius="8"
+                CornerRadius="{DynamicResource SurfaceCornerRadius}"
                 Padding="10">
             <Grid>
                 <Grid.RowDefinitions>
@@ -350,7 +263,7 @@
                                    FontWeight="SemiBold" />
                         <TextBlock Text="{Binding StatusText}"
                                    Foreground="{DynamicResource TextMutedBrush}"
-                                   FontSize="10"
+                                    FontSize="{DynamicResource CaptionFontSize}"
                                    Margin="0,2,0,0"
                                    TextTrimming="CharacterEllipsis" />
                     </StackPanel>
@@ -359,8 +272,9 @@
                             Width="28"
                             Height="28"
                             Padding="0"
-                            Style="{StaticResource GhostButtonStyle}"
-                            ToolTip="{Binding ModuleToggleToolTip}">
+                             Style="{StaticResource GhostButtonStyle}"
+                             ToolTip="{Binding ModuleToggleToolTip}"
+                             AutomationProperties.Name="{Binding ModuleToggleToolTip}">
                         <TextBlock Text="{Binding ModuleToggleGlyph}"
                                    FontFamily="Segoe Fluent Icons"
                                    FontSize="13" />
@@ -386,9 +300,10 @@
                             Width="30"
                             Height="30"
                             Margin="6,0,0,0"
-                            Padding="0"
-                            Style="{StaticResource GhostButtonStyle}"
-                            ToolTip="添加模块">
+                             Padding="0"
+                             Style="{StaticResource GhostButtonStyle}"
+                             ToolTip="添加模块"
+                             AutomationProperties.Name="添加模块">
                         <TextBlock Text="&#xE710;"
                                    FontFamily="Segoe Fluent Icons"
                                    FontSize="14"
@@ -400,23 +315,24 @@
                       Visibility="{Binding AreModulesExpanded, Converter={StaticResource BooleanToVisibilityConverter}}">
                     <TextBlock Text="暂无模块"
                                Foreground="{DynamicResource TextMutedBrush}"
-                               FontSize="11"
+                                FontSize="{DynamicResource CaptionFontSize}"
                                VerticalAlignment="Center"
                                HorizontalAlignment="Center"
                                Visibility="{Binding Modules.Count, Converter={StaticResource ZeroToVisibilityConverter}}" />
-                    <ListBox ItemsSource="{Binding Modules}"
+                         <ListBox ItemsSource="{Binding Modules}"
                              Background="Transparent"
                              BorderThickness="0"
                              Padding="0"
                              Visibility="{Binding Modules.Count, Converter={StaticResource InverseBooleanToVisibilityConverter}}"
                              ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                             ScrollViewer.VerticalScrollBarVisibility="Auto">
+                              ScrollViewer.VerticalScrollBarVisibility="Auto"
+                              AutomationProperties.Name="项目模块列表">
                         <ListBox.ItemContainerStyle>
                             <Style TargetType="{x:Type ListBoxItem}">
                                 <Setter Property="Padding" Value="0" />
                                 <Setter Property="Margin" Value="0,0,0,4" />
                                 <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-                                <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+                                <Setter Property="FocusVisualStyle" Value="{DynamicResource AppFocusVisualStyle}" />
                             </Style>
                         </ListBox.ItemContainerStyle>
                         <ListBox.ItemTemplate>
@@ -478,14 +394,14 @@
                VerticalOffset="5"
                AllowsTransparency="True"
                StaysOpen="True"
-               PopupAnimation="Fade">
+               PopupAnimation="{x:Static infrastructure:WindowMotion.PopupAnimation}">
             <Border Margin="8"
                     Width="260"
                     Padding="10"
-                    Background="{DynamicResource PanelBrush}"
-                    BorderBrush="{DynamicResource BorderBrushSoft}"
+                    Background="{DynamicResource AcrylicSurfaceBrush}"
+                    BorderBrush="{DynamicResource AcrylicStrokeBrush}"
                     BorderThickness="1"
-                    CornerRadius="8">
+                    CornerRadius="{DynamicResource PopupCornerRadius}">
                 <StackPanel>
                     <TextBox x:Name="ProjectRenameTextBox"
                              KeyDown="OnProjectRenameKeyDown"
@@ -515,14 +431,14 @@
                VerticalOffset="5"
                AllowsTransparency="True"
                StaysOpen="True"
-               PopupAnimation="Fade">
+               PopupAnimation="{x:Static infrastructure:WindowMotion.PopupAnimation}">
             <Border Margin="8"
                     Width="250"
                     Padding="11"
-                    Background="{DynamicResource PanelBrush}"
-                    BorderBrush="{DynamicResource BorderBrushSoft}"
+                    Background="{DynamicResource AcrylicSurfaceBrush}"
+                    BorderBrush="{DynamicResource AcrylicStrokeBrush}"
                     BorderThickness="1"
-                    CornerRadius="8">
+                    CornerRadius="{DynamicResource PopupCornerRadius}">
                 <StackPanel>
                     <TextBlock Text="删除项目收纳盒？"
                                Foreground="{DynamicResource TextPrimaryBrush}"
@@ -530,7 +446,7 @@
                                FontWeight="SemiBold" />
                     <TextBlock Text="模块与关联会一并移除。"
                                Foreground="{DynamicResource TextMutedBrush}"
-                               FontSize="10"
+                               FontSize="{DynamicResource CaptionFontSize}"
                                Margin="0,4,0,0" />
                     <StackPanel Orientation="Horizontal"
                                 HorizontalAlignment="Right"
@@ -556,14 +472,14 @@
                VerticalOffset="5"
                AllowsTransparency="True"
                StaysOpen="True"
-               PopupAnimation="Fade">
+               PopupAnimation="{x:Static infrastructure:WindowMotion.PopupAnimation}">
             <Border Margin="8"
                     Width="260"
                     Padding="11"
-                    Background="{DynamicResource PanelBrush}"
-                    BorderBrush="{DynamicResource BorderBrushSoft}"
+                    Background="{DynamicResource AcrylicSurfaceBrush}"
+                    BorderBrush="{DynamicResource AcrylicStrokeBrush}"
                     BorderThickness="1"
-                    CornerRadius="8">
+                    CornerRadius="{DynamicResource PopupCornerRadius}">
                 <StackPanel>
                     <TextBlock Text="归档项目收纳盒？"
                                Foreground="{DynamicResource TextPrimaryBrush}"
@@ -571,7 +487,7 @@
                                FontWeight="SemiBold" />
                     <TextBlock Text="关联的文件收纳盒和桌面便签会一起移到归档区，并从桌面隐藏。"
                                Foreground="{DynamicResource TextMutedBrush}"
-                               FontSize="10"
+                               FontSize="{DynamicResource CaptionFontSize}"
                                Margin="0,4,0,0"
                                TextWrapping="Wrap" />
                     <StackPanel Orientation="Horizontal"

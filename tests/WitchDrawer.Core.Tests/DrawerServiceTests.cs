@@ -265,6 +265,45 @@ public sealed class DrawerServiceTests
     }
 
     [Fact]
+    public async Task GetItemsAsync_MappingBoxRemovesDeletedReference()
+    {
+        using var workspace = await TestWorkspace.CreateAsync();
+        var source = workspace.CreateSourceFile("mapping-delete", "obsolete.txt", "hello");
+        var mappingBox = await workspace.GetBoxAsync(BoxType.Mapping);
+        var item = await workspace.Service.ImportPathAsync(mappingBox.Id, source);
+
+        File.Delete(source);
+        var items = await workspace.Service.GetItemsAsync(mappingBox.Id);
+
+        Assert.DoesNotContain(items, candidate => candidate.Id == item.Id);
+        Assert.Null(await workspace.Repository.GetItemAsync(item.Id));
+    }
+
+    [Fact]
+    public async Task SynchronizeExternalRenameAsync_MappingBoxUpdatesReferencedPath()
+    {
+        using var workspace = await TestWorkspace.CreateAsync();
+        var source = workspace.CreateSourceFile("mapping-rename", "before.txt", "hello");
+        var mappingBox = await workspace.GetBoxAsync(BoxType.Mapping);
+        var item = await workspace.Service.ImportPathAsync(mappingBox.Id, source);
+        var renamed = Path.Combine(Path.GetDirectoryName(source)!, "after.txt");
+        File.Move(source, renamed);
+
+        var synchronized = await workspace.Service.SynchronizeExternalRenameAsync(
+            mappingBox.Id,
+            source,
+            renamed);
+
+        Assert.True(synchronized);
+        var updated = Assert.Single(await workspace.Service.GetItemsAsync(mappingBox.Id));
+        Assert.Equal(item.Id, updated.Id);
+        Assert.Equal("after.txt", updated.DisplayName);
+        Assert.Equal(renamed, updated.SourcePath);
+        Assert.Null(updated.StoredPath);
+        Assert.True(File.Exists(renamed));
+    }
+
+    [Fact]
     public async Task ImportPathAsync_TodoBoxRejectsFileWithoutMovingIt()
     {
         using var workspace = await TestWorkspace.CreateAsync();
@@ -797,6 +836,78 @@ public sealed class DrawerServiceTests
             await File.ReadAllTextAsync(Path.Combine(copiedFolder.StoredPath!, "nested.txt")));
         Assert.Equal("资料 (1).txt", duplicate.DisplayName);
         Assert.Equal(3, (await workspace.Service.GetItemsAsync(box.Id)).Count);
+    }
+
+    [Fact]
+    public async Task MovePathsIntoFolderAsync_MovesExternalFileUnderSelectedBoxFolder()
+    {
+        using var workspace = await TestWorkspace.CreateAsync();
+        var box = await workspace.GetBoxAsync(BoxType.Normal);
+        var folder = await workspace.Service.CreateFileSystemItemAsync(
+            box.Id,
+            ItemKind.Directory,
+            "归档资料");
+        var sourceFile = workspace.CreateSourceFile("drop-into-folder", "报价单.txt", "payload");
+
+        var movedPaths = await workspace.Service.MovePathsIntoFolderAsync(
+            box.Id,
+            folder.Id,
+            [sourceFile]);
+
+        var movedPath = Assert.Single(movedPaths);
+        Assert.Equal(Path.Combine(folder.StoredPath!, "报价单.txt"), movedPath);
+        Assert.False(File.Exists(sourceFile));
+        Assert.Equal("payload", await File.ReadAllTextAsync(movedPath));
+        Assert.DoesNotContain(
+            await workspace.Service.GetItemsAsync(box.Id),
+            item => item.DisplayName == "报价单.txt");
+    }
+
+    [Fact]
+    public async Task MovePathsIntoFolderAsync_TargetBoxMovesFileUnderSelectedFolder()
+    {
+        using var workspace = await TestWorkspace.CreateAsync();
+        var boundRoot = Path.Combine(workspace.Root, "folder-drop-target");
+        Directory.CreateDirectory(boundRoot);
+        var box = await workspace.Service.CreateBoundBoxAsync("目标收纳盒", boundRoot);
+        var folder = await workspace.Service.CreateFileSystemItemAsync(
+            box.Id,
+            ItemKind.Directory,
+            "交付资料");
+        var sourceFile = workspace.CreateSourceFile("bound-folder-drop", "清单.txt", "content");
+
+        var movedPath = Assert.Single(await workspace.Service.MovePathsIntoFolderAsync(
+            box.Id,
+            folder.Id,
+            [sourceFile]));
+
+        Assert.Equal(Path.Combine(folder.StoredPath!, "清单.txt"), movedPath);
+        Assert.True(File.Exists(movedPath));
+        Assert.DoesNotContain(
+            await workspace.Service.GetItemsAsync(box.Id),
+            item => item.DisplayName == "清单.txt");
+    }
+
+    [Fact]
+    public async Task MovePathsIntoFolderAsync_AddsSuffixForConflictingName()
+    {
+        using var workspace = await TestWorkspace.CreateAsync();
+        var box = await workspace.GetBoxAsync(BoxType.Normal);
+        var folder = await workspace.Service.CreateFileSystemItemAsync(
+            box.Id,
+            ItemKind.Directory,
+            "资料");
+        await File.WriteAllTextAsync(Path.Combine(folder.StoredPath!, "报告.txt"), "existing");
+        var sourceFile = workspace.CreateSourceFile("folder-conflict", "报告.txt", "new");
+
+        var movedPath = Assert.Single(await workspace.Service.MovePathsIntoFolderAsync(
+            box.Id,
+            folder.Id,
+            [sourceFile]));
+
+        Assert.Equal(Path.Combine(folder.StoredPath!, "报告 (1).txt"), movedPath);
+        Assert.Equal("existing", await File.ReadAllTextAsync(Path.Combine(folder.StoredPath!, "报告.txt")));
+        Assert.Equal("new", await File.ReadAllTextAsync(movedPath));
     }
 
     [Fact]

@@ -10,9 +10,12 @@
         ShowInTaskbar="False"
         ShowActivated="False"
         WindowStyle="None"
+        AllowsTransparency="False"
         ResizeMode="CanResizeWithGrip"
-        Background="{DynamicResource AppBackgroundBrush}"
+        Background="Transparent"
         Foreground="{DynamicResource TextPrimaryBrush}"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True"
         PreviewKeyDown="OnPreviewKeyDown">
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
@@ -27,6 +30,7 @@
             <Setter Property="FontFamily" Value="Segoe MDL2 Assets" />
             <Setter Property="FontSize" Value="13" />
             <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="FocusVisualStyle" Value="{DynamicResource AppFocusVisualStyle}" />
             <Style.Triggers>
                 <Trigger Property="IsMouseOver" Value="True">
                     <Setter Property="Background" Value="{DynamicResource HoverBrush}" />
@@ -42,6 +46,7 @@
             <Setter Property="Margin" Value="0,1" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="ToolTip" Value="{Binding StoragePath}" />
+            <Setter Property="FocusVisualStyle" Value="{DynamicResource AppFocusVisualStyle}" />
             <Style.Triggers>
                 <Trigger Property="IsMouseOver" Value="True">
                     <Setter Property="Background" Value="{DynamicResource HoverBrush}" />
@@ -73,11 +78,11 @@
                                    FontWeight="SemiBold"
                                    TextTrimming="CharacterEllipsis" />
                         <TextBlock Text="{Binding TypeLabel}"
-                                   FontSize="10.5"
+                                   FontSize="{DynamicResource CaptionFontSize}"
                                    Foreground="{DynamicResource TextMutedBrush}"
                                    TextTrimming="CharacterEllipsis" />
                         <TextBlock Text="{Binding StatusText}"
-                                   FontSize="10.5"
+                                   FontSize="{DynamicResource CaptionFontSize}"
                                    Foreground="{DynamicResource DangerBrush}" />
                     </StackPanel>
                 </Grid>
@@ -85,9 +90,11 @@
         </DataTemplate>
     </Window.Resources>
 
-    <Border BorderBrush="{DynamicResource BorderBrushSoft}"
+    <Border BorderBrush="{DynamicResource AcrylicStrokeBrush}"
             BorderThickness="1"
-            Background="{DynamicResource AppBackgroundBrush}">
+            Background="{DynamicResource AcrylicSurfaceBrush}"
+            CornerRadius="12"
+            ClipToBounds="True">
         <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="44" />
@@ -121,7 +128,9 @@
                         AutomationProperties.Name="更多选项"
                         Click="OnMoreButtonClick">
                     <Button.ContextMenu>
-                        <ContextMenu Placement="Bottom">
+                        <ContextMenu Placement="Bottom"
+                                     Background="{DynamicResource AcrylicSurfaceBrush}"
+                                     BorderBrush="{DynamicResource AcrylicStrokeBrush}">
                             <MenuItem Header="对此应用不再显示"
                                       Command="{Binding PlacementTarget.DataContext.BlacklistCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
                         </ContextMenu>
@@ -160,7 +169,7 @@
                     Visibility="{Binding HasError, Converter={StaticResource BooleanToVisibilityConverter}}">
                 <TextBlock Text="{Binding ErrorText}"
                            Foreground="{DynamicResource DangerBrush}"
-                           FontSize="11"
+                           FontSize="{DynamicResource CaptionFontSize}"
                            TextWrapping="Wrap" />
             </Border>
 
@@ -173,17 +182,18 @@
                     <StackPanel Visibility="{Binding HasRecentEntries, Converter={StaticResource BooleanToVisibilityConverter}}">
                         <TextBlock Text="最近使用"
                                    Margin="6,4,6,3"
-                                   FontSize="10.5"
+                                    FontSize="{DynamicResource CaptionFontSize}"
                                    FontWeight="SemiBold"
                                    Foreground="{DynamicResource TextMutedBrush}" />
                         <ItemsControl ItemsSource="{Binding RecentEntries}"
                                       ItemTemplate="{StaticResource AccessEntryTemplate}" />
-                        <Separator Margin="4,7" />
+                    <Separator Margin="4,7"
+                               Background="{DynamicResource AcrylicStrokeBrush}" />
                     </StackPanel>
 
                     <TextBlock Text="全部收纳盒"
                                Margin="6,2,6,3"
-                               FontSize="10.5"
+                                FontSize="{DynamicResource CaptionFontSize}"
                                FontWeight="SemiBold"
                                Foreground="{DynamicResource TextMutedBrush}" />
                     <ListBox x:Name="AccessList"
@@ -204,8 +214,9 @@
                             <Style TargetType="ListBoxItem">
                                 <Setter Property="Padding" Value="0" />
                                 <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-                                <Setter Property="Background" Value="Transparent" />
-                                <Setter Property="BorderThickness" Value="0" />
+                                 <Setter Property="Background" Value="Transparent" />
+                                 <Setter Property="BorderThickness" Value="0" />
+                                 <Setter Property="FocusVisualStyle" Value="{DynamicResource AppFocusVisualStyle}" />
                             </Style>
                         </ListBox.ItemContainerStyle>
                     </ListBox>

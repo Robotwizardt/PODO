@@ -240,7 +240,7 @@ public sealed class DesktopProjectTodoTests
     }
 
     [Fact]
-    public async Task DesktopProjectFolder_SizeCanChangeAndReload()
+    public async Task DesktopProjectFolder_UsesContentAdaptiveWindowSizing()
     {
         var root = CreateTempRoot();
         try
@@ -254,29 +254,15 @@ public sealed class DesktopProjectTodoTests
                 new NoOpFileLauncher(),
                 new NoOpLogger(),
                 BoxVisualStyle.Modern);
-            await viewModel.LoadSizeModeAsync();
+            await viewModel.LoadAsync();
 
-            Assert.Equal(3, viewModel.ProjectFolderColumns);
-            Assert.Equal(4, viewModel.ProjectFolderVisibleRows);
-            var defaultWidth = viewModel.ProjectFolderWidth;
-            var defaultHeight = viewModel.ProjectFolderMaxHeight;
-
-            await viewModel.IncreaseProjectFolderColumnsCommand.ExecuteAsync(null);
-            await viewModel.DecreaseProjectFolderRowsCommand.ExecuteAsync(null);
-
-            var reloaded = new DesktopBoxViewModel(
-                folder,
-                drawerService,
-                new TodoService(repository),
-                new NoOpFileLauncher(),
-                new NoOpLogger(),
-                BoxVisualStyle.Modern);
-            await reloaded.LoadSizeModeAsync();
-
-            Assert.Equal(4, reloaded.ProjectFolderColumns);
-            Assert.Equal(3, reloaded.ProjectFolderVisibleRows);
-            Assert.True(reloaded.ProjectFolderWidth > defaultWidth);
-            Assert.True(reloaded.ProjectFolderMaxHeight < defaultHeight);
+            Assert.True(viewModel.IsProjectFolder);
+            Assert.Equal(
+                System.Windows.Controls.ScrollBarVisibility.Auto,
+                viewModel.GridHorizontalScrollBarVisibility);
+            Assert.Equal(
+                System.Windows.Controls.ScrollBarVisibility.Auto,
+                viewModel.GridVerticalScrollBarVisibility);
         }
         finally
         {
@@ -496,23 +482,10 @@ public sealed class DesktopProjectTodoTests
                             Assert.Contains("删除", menuHeaders);
                         }
 
-                        if (box.Type is BoxType.Normal or BoxType.Pixel or BoxType.Bound)
-                        {
-                            var sizeControls = Assert.IsAssignableFrom<FrameworkElement>(
-                                window.FindName("DesktopGridSizeControls"));
-                            Assert.True(
-                                sizeControls.Visibility == Visibility.Visible,
-                                $"{box.Type} desktop window does not expose size controls.");
-                        }
-
                         if (box.Type == BoxType.Project)
                         {
                             AssertNoProjectProgressIndicators(window);
                             AssertProjectWindowAddsModule(window, viewModel);
-                        }
-                        else if (box.Type == BoxType.ProjectFolder)
-                        {
-                            AssertProjectFolderSizeControls(window, viewModel);
                         }
                     }
                     finally
@@ -525,9 +498,15 @@ public sealed class DesktopProjectTodoTests
                 AssertProjectManagementViewHasNoProgress(
                     new ProjectService(repository),
                     projectBox);
-                AssertBoundBoxResizeReflows(drawerService, repository, root);
+                AssertFileBoxResizeReflows(drawerService, repository, root);
+                AssertLinkedProjectBoxResizeHitTests(drawerService, repository, root);
+                AssertLinkingManualSizedBoundBoxPreservesVisibleSize(
+                    drawerService,
+                    repository,
+                    root);
                 AssertProjectAttachmentButtonsHaveUsableHitTargets(drawerService, repository);
-                AssertDesktopPaperManagerWindowLoads();
+                AssertDesktopPaperManagerWindowArchivesPaper();
+                AssertMainArchivePageShowsDesktopPapers(drawerService, repository, root);
                 AssertManagedDesktopActionsMenuExecutes(
                     drawerService,
                     repository,
@@ -645,6 +624,482 @@ public sealed class DesktopProjectTodoTests
         }
     }
 
+    private static void AssertLinkedProjectBoxResizeHitTests(
+        DrawerService drawerService,
+        DrawerRepository repository,
+        string root)
+    {
+        const uint wmNcHitTest = 0x0084;
+        const uint wmSetCursor = 0x0020;
+        const uint wmMouseMove = 0x0200;
+        const int htRight = 11;
+        const int htBottom = 15;
+        var projectService = new ProjectService(repository);
+        var projectFolderService = new ProjectFolderService(repository);
+        var memberProject = drawerService.CreateBoxAsync("小卫", BoxType.Project)
+            .GetAwaiter()
+            .GetResult();
+        var companionProject = drawerService.CreateBoxAsync("小卫同组项目", BoxType.Project)
+            .GetAwaiter()
+            .GetResult();
+        var linkedFolder = Path.Combine(root, "小卫电器");
+        Directory.CreateDirectory(linkedFolder);
+        var linkedBox = drawerService.CreateBoundBoxAsync("小卫电器", linkedFolder)
+            .GetAwaiter()
+            .GetResult();
+        projectService.GetOrCreateProjectAsync(memberProject.Id)
+            .GetAwaiter()
+            .GetResult();
+        projectService.GetOrCreateProjectAsync(companionProject.Id)
+            .GetAwaiter()
+            .GetResult();
+        var projectFolder = projectFolderService.CreateAsync(
+                "小卫项目文件夹",
+                [memberProject.Id, companionProject.Id])
+            .GetAwaiter()
+            .GetResult();
+        var projectViewModel = new DesktopBoxViewModel(
+            memberProject,
+            drawerService,
+            new TodoService(repository),
+            new NoOpFileLauncher(),
+            new NoOpLogger(),
+            BoxVisualStyle.Modern,
+            projectService: projectService,
+            projectFolderService: projectFolderService);
+        projectViewModel.LoadAsync().GetAwaiter().GetResult();
+        Assert.True(
+            projectViewModel.LinkProjectBoxAtSideAsync(
+                    linkedBox.Id,
+                    ProjectAttachmentSide.Left)
+                .GetAwaiter()
+                .GetResult());
+        drawerService.SetSettingAsync(
+                BoxViewModel.GetLayoutPresetSettingKey(linkedBox.Id),
+                "3x3")
+            .GetAwaiter()
+            .GetResult();
+        drawerService.SetSettingAsync(
+                $"BoxSizeMode:{linkedBox.Id:N}",
+                "Fixed:5:4")
+            .GetAwaiter()
+            .GetResult();
+        drawerService.SetSettingAsync(
+                BoxViewModel.GetWindowSizeSettingKey(linkedBox.Id),
+                "850.6666666666666,597.3333333333334")
+            .GetAwaiter()
+            .GetResult();
+        drawerService.SetSettingAsync(
+                $"ProjectLinkedBoxManualPosition:{linkedBox.Id:N}",
+                bool.FalseString)
+            .GetAwaiter()
+            .GetResult();
+
+        var previousSynchronizationContext = SynchronizationContext.Current;
+        SynchronizationContext.SetSynchronizationContext(
+            new System.Windows.Threading.DispatcherSynchronizationContext(
+                System.Windows.Threading.Dispatcher.CurrentDispatcher));
+        var manager = new DesktopBoxManager(
+            drawerService,
+            new TodoService(repository),
+            new NoOpFileLauncher(),
+            new NoOpLogger(),
+            new BoxVisualStyleStore(drawerService, new NoOpLogger()),
+            new BoxPositionLockStateStore(drawerService, new NoOpLogger()));
+        try
+        {
+            AwaitWithDispatcher(manager.RefreshAsync());
+            var folderWindow = Application.Current.Windows
+                .OfType<DesktopBoxWindow>()
+                .Single(window => window.ViewModel.BoxId == projectFolder.Id);
+            var member = folderWindow.ViewModel.ProjectFolderMembers
+                .Single(item => item.ProjectBoxId == memberProject.Id);
+
+            folderWindow.ViewModel.OpenProjectFolderMemberCommand
+                .ExecuteAsync(member)
+                .GetAwaiter()
+                .GetResult();
+            WaitFor(
+                () => Application.Current.Windows
+                    .OfType<DesktopBoxWindow>()
+                    .Any(window =>
+                        window.ViewModel.BoxId == linkedBox.Id
+                        && window.IsVisible),
+                "Opening the project-folder member did not show its linked box.");
+
+            var linkedWindow = Application.Current.Windows
+                .OfType<DesktopBoxWindow>()
+                .Single(window => window.ViewModel.BoxId == linkedBox.Id);
+            Assert.True(linkedWindow.IsVisible);
+            linkedWindow.UpdateLayout();
+            PumpDispatcher();
+            var handle = new WindowInteropHelper(linkedWindow).Handle;
+            Assert.NotEqual(nint.Zero, handle);
+            Assert.True(
+                GetWindowRect(handle, out var rectangle),
+                $"GetWindowRect failed with Win32 error {Marshal.GetLastWin32Error()}.");
+            var centerX = rectangle.Left + ((rectangle.Right - rectangle.Left) / 2);
+            var centerY = rectangle.Top + ((rectangle.Bottom - rectangle.Top) / 2);
+            var rightResult = SendMessage(
+                handle,
+                wmNcHitTest,
+                nint.Zero,
+                MakeScreenPointLParam(rectangle.Right - 2, centerY)).ToInt32();
+            Assert.True(
+                rightResult == htRight,
+                $"The linked box right edge returned {rightResult}, expected {htRight}.");
+            var bottomResult = SendMessage(
+                handle,
+                wmNcHitTest,
+                nint.Zero,
+                MakeScreenPointLParam(centerX, rectangle.Bottom - 2)).ToInt32();
+            Assert.True(
+                bottomResult == htBottom,
+                $"The linked box bottom edge returned {bottomResult}, expected {htBottom}.");
+            var rightCursorResult = SendMessage(
+                handle,
+                wmSetCursor,
+                handle,
+                MakeMessageLParam(htRight, (int)wmMouseMove));
+            Assert.True(
+                rightCursorResult != nint.Zero,
+                "The linked box did not handle WM_SETCURSOR for its right resize edge.");
+            var bottomCursorResult = SendMessage(
+                handle,
+                wmSetCursor,
+                handle,
+                MakeMessageLParam(htBottom, (int)wmMouseMove));
+            Assert.True(
+                bottomCursorResult != nint.Zero,
+                "The linked box did not handle WM_SETCURSOR for its bottom resize edge.");
+
+            PerformNativeLeftResize(handle, rectangle);
+            linkedWindow.UpdateLayout();
+            PumpDispatcher();
+            var resizedWidth = linkedWindow.ActualWidth;
+            var resizedHeight = linkedWindow.ActualHeight;
+            Assert.True(
+                resizedWidth > 0 && resizedHeight > 0,
+                $"The linked box native left resize produced {resizedWidth}x{resizedHeight}.");
+
+            var memberWindow = Application.Current.Windows
+                .OfType<DesktopBoxWindow>()
+                .Single(window => window.ViewModel.BoxId == memberProject.Id);
+            var returnButton = FindVisualDescendant<Button>(
+                memberWindow,
+                button => string.Equals(
+                    button.ToolTip as string,
+                    "收回文件夹",
+                    StringComparison.Ordinal));
+            Assert.NotNull(returnButton);
+            InvokeButton(returnButton);
+            WaitFor(
+                () => !memberWindow.IsVisible && !linkedWindow.IsVisible,
+                "Returning the member project to its folder did not hide the project and linked box.");
+
+            folderWindow.ViewModel.OpenProjectFolderMemberCommand
+                .ExecuteAsync(member)
+                .GetAwaiter()
+                .GetResult();
+            WaitFor(
+                () => memberWindow.IsVisible && linkedWindow.IsVisible,
+                "Reopening the project-folder member did not show the project and linked box.");
+            linkedWindow.UpdateLayout();
+            PumpDispatcher();
+            Assert.InRange(linkedWindow.ActualWidth, resizedWidth - 1, resizedWidth + 1);
+            Assert.InRange(linkedWindow.ActualHeight, resizedHeight - 1, resizedHeight + 1);
+
+            Assert.True(
+                GetWindowRect(handle, out rectangle),
+                $"GetWindowRect after reopening failed with Win32 error {Marshal.GetLastWin32Error()}.");
+            centerX = rectangle.Left + ((rectangle.Right - rectangle.Left) / 2);
+            centerY = rectangle.Top + ((rectangle.Bottom - rectangle.Top) / 2);
+            rightResult = SendMessage(
+                handle,
+                wmNcHitTest,
+                nint.Zero,
+                MakeScreenPointLParam(rectangle.Right - 2, centerY)).ToInt32();
+            Assert.True(
+                rightResult == htRight,
+                $"The reopened linked box right edge returned {rightResult}, expected {htRight}.");
+            bottomResult = SendMessage(
+                handle,
+                wmNcHitTest,
+                nint.Zero,
+                MakeScreenPointLParam(centerX, rectangle.Bottom - 2)).ToInt32();
+            Assert.True(
+                bottomResult == htBottom,
+                $"The reopened linked box bottom edge returned {bottomResult}, expected {htBottom}.");
+            rightCursorResult = SendMessage(
+                handle,
+                wmSetCursor,
+                handle,
+                MakeMessageLParam(htRight, (int)wmMouseMove));
+            Assert.True(
+                rightCursorResult != nint.Zero,
+                "The reopened linked box did not handle WM_SETCURSOR for its right resize edge.");
+            bottomCursorResult = SendMessage(
+                handle,
+                wmSetCursor,
+                handle,
+                MakeMessageLParam(htBottom, (int)wmMouseMove));
+            Assert.True(
+                bottomCursorResult != nint.Zero,
+                "The reopened linked box did not handle WM_SETCURSOR for its bottom resize edge.");
+        }
+        finally
+        {
+            AwaitWithDispatcher(manager.CloseAllAsync());
+            SynchronizationContext.SetSynchronizationContext(previousSynchronizationContext);
+        }
+    }
+
+    private static void AssertLinkingManualSizedBoundBoxPreservesVisibleSize(
+        DrawerService drawerService,
+        DrawerRepository repository,
+        string root)
+    {
+        var projectService = new ProjectService(repository);
+        var projectFolderService = new ProjectFolderService(repository);
+        var memberProject = drawerService.CreateBoxAsync("小卫", BoxType.Project)
+            .GetAwaiter()
+            .GetResult();
+        var companionProject = drawerService.CreateBoxAsync("小卫同组项目", BoxType.Project)
+            .GetAwaiter()
+            .GetResult();
+        var linkedFolder = Path.Combine(root, "小卫电器-关联瞬间");
+        Directory.CreateDirectory(linkedFolder);
+        var linkedBox = drawerService.CreateBoundBoxAsync("小卫电器", linkedFolder)
+            .GetAwaiter()
+            .GetResult();
+        projectService.GetOrCreateProjectAsync(memberProject.Id)
+            .GetAwaiter()
+            .GetResult();
+        projectService.GetOrCreateProjectAsync(companionProject.Id)
+            .GetAwaiter()
+            .GetResult();
+        var projectFolder = projectFolderService.CreateAsync(
+                "小卫项目文件夹-关联瞬间",
+                [memberProject.Id, companionProject.Id])
+            .GetAwaiter()
+            .GetResult();
+
+        // This is the same persisted state reported for the user's historical box:
+        // the association layout may move its Left/Top, but it must not replace the
+        // manually resized Width/Height when the drop callback completes.
+        drawerService.SetSettingAsync(
+                BoxViewModel.GetLayoutPresetSettingKey(linkedBox.Id),
+                "3x3")
+            .GetAwaiter()
+            .GetResult();
+        drawerService.SetSettingAsync(
+                $"BoxSizeMode:{linkedBox.Id:N}",
+                "Fixed:5:4")
+            .GetAwaiter()
+            .GetResult();
+        drawerService.SetSettingAsync(
+                BoxViewModel.GetWindowSizeSettingKey(linkedBox.Id),
+                "850.6666666666666,597.3333333333334")
+            .GetAwaiter()
+            .GetResult();
+        drawerService.SetSettingAsync(
+                $"ProjectLinkedBoxManualPosition:{linkedBox.Id:N}",
+                bool.FalseString)
+            .GetAwaiter()
+            .GetResult();
+
+        var previousSynchronizationContext = SynchronizationContext.Current;
+        SynchronizationContext.SetSynchronizationContext(
+            new System.Windows.Threading.DispatcherSynchronizationContext(
+                System.Windows.Threading.Dispatcher.CurrentDispatcher));
+        var manager = new DesktopBoxManager(
+            drawerService,
+            new TodoService(repository),
+            new NoOpFileLauncher(),
+            new NoOpLogger(),
+            new BoxVisualStyleStore(drawerService, new NoOpLogger()),
+            new BoxPositionLockStateStore(drawerService, new NoOpLogger()));
+        try
+        {
+            AwaitWithDispatcher(manager.RefreshAsync());
+            var folderWindow = Application.Current.Windows
+                .OfType<DesktopBoxWindow>()
+                .Single(window => window.ViewModel.BoxId == projectFolder.Id);
+            var member = folderWindow.ViewModel.ProjectFolderMembers
+                .Single(item => item.ProjectBoxId == memberProject.Id);
+
+            // Open the member through the same public folder command used by the UI.
+            folderWindow.ViewModel.OpenProjectFolderMemberCommand
+                .ExecuteAsync(member)
+                .GetAwaiter()
+                .GetResult();
+            WaitFor(
+                () => Application.Current.Windows
+                    .OfType<DesktopBoxWindow>()
+                    .Any(window =>
+                        window.ViewModel.BoxId == memberProject.Id
+                        && window.IsVisible),
+                "Opening the project-folder member did not show the member project.");
+
+            var memberWindow = Application.Current.Windows
+                .OfType<DesktopBoxWindow>()
+                .Single(window => window.ViewModel.BoxId == memberProject.Id);
+            var linkedWindow = Application.Current.Windows
+                .OfType<DesktopBoxWindow>()
+                .Single(window => window.ViewModel.BoxId == linkedBox.Id);
+            WaitFor(
+                () => linkedWindow.IsVisible,
+                "The unassociated Bound box did not become visible before the public drop.");
+
+            PumpRenderFrame();
+            var before = CaptureWindowGeometry(linkedWindow);
+            Assert.True(
+                before.Width > 0
+                && before.Height > 0
+                && before.ActualWidth > 0
+                && before.ActualHeight > 0
+                && before.NativeOuterWidth > 0
+                && before.NativeOuterHeight > 0
+                && before.NativeClientWidth > 0
+                && before.NativeClientHeight > 0,
+                $"The manual linked-box fixture was not measurable before linking: {before}.");
+
+            Assert.Equal(0, memberWindow.ViewModel.ProjectAttachmentCount);
+            Assert.True(
+                memberWindow.ViewModel.LinkProjectBoxAtSideAsync(
+                        linkedBox.Id,
+                        ProjectAttachmentSide.Left)
+                    .GetAwaiter()
+                    .GetResult());
+
+            WaitFor(
+                () => memberWindow.ViewModel.ProjectAttachmentCount == 1
+                    && memberWindow.ViewModel.ProjectLeftAttachmentCount == 1
+                    && memberWindow.ViewModel.ProjectAssociationMessage.Contains(
+                        "已关联文件收纳盒到左侧",
+                        StringComparison.Ordinal),
+                "The public Bound-box link did not complete the left project association.");
+            PumpRenderFrame();
+            var after = CaptureWindowGeometry(linkedWindow);
+            AssertWindowGeometryUnchanged(before, after, "public association completion");
+        }
+        finally
+        {
+            AwaitWithDispatcher(manager.CloseAllAsync());
+            SynchronizationContext.SetSynchronizationContext(previousSynchronizationContext);
+        }
+    }
+
+    private static WindowGeometry CaptureWindowGeometry(DesktopBoxWindow window)
+    {
+        var handle = new WindowInteropHelper(window).Handle;
+        Assert.NotEqual(nint.Zero, handle);
+        Assert.True(
+            GetWindowRect(handle, out var outer),
+            $"GetWindowRect failed with Win32 error {Marshal.GetLastWin32Error()}.");
+        Assert.True(
+            GetClientRect(handle, out var client),
+            $"GetClientRect failed with Win32 error {Marshal.GetLastWin32Error()}.");
+        return new WindowGeometry(
+            window.Width,
+            window.Height,
+            window.ActualWidth,
+            window.ActualHeight,
+            outer.Right - outer.Left,
+            outer.Bottom - outer.Top,
+            client.Right - client.Left,
+            client.Bottom - client.Top);
+    }
+
+    private static void AssertWindowGeometryUnchanged(
+        WindowGeometry before,
+        WindowGeometry after,
+        string phase)
+    {
+        AssertDimensionUnchanged("Width", before.Width, after.Width, before, after, phase);
+        AssertDimensionUnchanged("Height", before.Height, after.Height, before, after, phase);
+        AssertDimensionUnchanged(
+            "ActualWidth",
+            before.ActualWidth,
+            after.ActualWidth,
+            before,
+            after,
+            phase);
+        AssertDimensionUnchanged(
+            "ActualHeight",
+            before.ActualHeight,
+            after.ActualHeight,
+            before,
+            after,
+            phase);
+        AssertDimensionUnchanged(
+            "native outer width",
+            before.NativeOuterWidth,
+            after.NativeOuterWidth,
+            before,
+            after,
+            phase);
+        AssertDimensionUnchanged(
+            "native outer height",
+            before.NativeOuterHeight,
+            after.NativeOuterHeight,
+            before,
+            after,
+            phase);
+        AssertDimensionUnchanged(
+            "native client width",
+            before.NativeClientWidth,
+            after.NativeClientWidth,
+            before,
+            after,
+            phase);
+        AssertDimensionUnchanged(
+            "native client height",
+            before.NativeClientHeight,
+            after.NativeClientHeight,
+            before,
+            after,
+            phase);
+    }
+
+    private static void AssertDimensionUnchanged(
+        string name,
+        double expected,
+        double actual,
+        WindowGeometry before,
+        WindowGeometry after,
+        string phase)
+    {
+        Assert.True(
+            Math.Abs(expected - actual) <= 1,
+            $"{name} changed during {phase}: expected {expected:0.###} ±1, actual {actual:0.###}. "
+            + $"Before {before}; after {after}.");
+    }
+
+    private static void AssertDimensionUnchanged(
+        string name,
+        int expected,
+        int actual,
+        WindowGeometry before,
+        WindowGeometry after,
+        string phase)
+    {
+        Assert.True(
+            Math.Abs(expected - actual) <= 1,
+            $"{name} changed during {phase}: expected {expected} ±1, actual {actual}. "
+            + $"Before {before}; after {after}.");
+    }
+
+    private readonly record struct WindowGeometry(
+        double Width,
+        double Height,
+        double ActualWidth,
+        double ActualHeight,
+        int NativeOuterWidth,
+        int NativeOuterHeight,
+        int NativeClientWidth,
+        int NativeClientHeight);
+
     private static void AssertProjectManagementViewHasNoProgress(
         ProjectService projectService,
         Box projectBox)
@@ -685,21 +1140,30 @@ public sealed class DesktopProjectTodoTests
         }
     }
 
-    private static void AssertBoundBoxResizeReflows(
+    private static void AssertFileBoxResizeReflows(
         DrawerService drawerService,
         DrawerRepository repository,
         string root)
     {
-        var source = Path.Combine(root, "bound-resize-source");
+        var source = Path.Combine(root, "resize-source");
         Directory.CreateDirectory(source);
+        var sourcePaths = new List<string>();
         foreach (var index in Enumerable.Range(1, 10))
         {
-            Directory.CreateDirectory(Path.Combine(source, $"item-{index}"));
+            var itemPath = Path.Combine(source, $"item-{index:00}");
+            Directory.CreateDirectory(itemPath);
+            sourcePaths.Add(itemPath);
         }
 
-        var box = drawerService.CreateBoundBoxAsync("海城项目文件夹", source)
+        var box = drawerService.CreateBoxAsync("尺寸重排测试", BoxType.Normal)
             .GetAwaiter()
             .GetResult();
+        foreach (var itemPath in sourcePaths)
+        {
+            drawerService.ImportPathAsync(box.Id, itemPath)
+                .GetAwaiter()
+                .GetResult();
+        }
         var viewModel = new DesktopBoxViewModel(
             box,
             drawerService,
@@ -707,33 +1171,109 @@ public sealed class DesktopProjectTodoTests
             new NoOpFileLauncher(),
             new NoOpLogger(),
             BoxVisualStyle.Modern);
-        viewModel.ApplySizeMode(new BoxSizeModeState(true, 10, 3));
         viewModel.LoadAsync().GetAwaiter().GetResult();
 
         var window = new DesktopBoxWindow(viewModel)
         {
-            Left = -10000,
-            Top = -10000,
-            ShowInTaskbar = false
+            Left = 40,
+            Top = 40,
+            ShowInTaskbar = false,
+            SizeToContent = SizeToContent.Manual,
+            Width = 640,
+            Height = 1000
         };
         try
         {
             window.Show();
-            AssertBoundItemsVisible(window, viewModel);
+            window.UpdateLayout();
+            PumpDispatcher();
 
-            viewModel.ApplySizeMode(new BoxSizeModeState(true, 10, 4));
-            AssertBoundItemsVisible(window, viewModel);
-
-            viewModel.ApplySizeMode(new BoxSizeModeState(true, 4, 1));
-            AssertBoundItemsVisible(window, viewModel);
-            Assert.Equal(3, viewModel.Items.Max(item => item.GridColumn));
-            Assert.Equal(2, viewModel.Items.Max(item => item.GridRow));
+            var movedItem = viewModel.Items[0];
+            Assert.True(
+                viewModel.DropDrawerItemAsync(movedItem.Id, targetColumn: 0, targetRow: 2)
+                    .GetAwaiter()
+                    .GetResult());
+            var persistedAfterDrag = drawerService
+                .GetItemsAsync(box.Id)
+                .GetAwaiter()
+                .GetResult()
+                .OrderBy(item => item.Id)
+                .Select(item => (item.Id, item.GridColumn, item.GridRow))
+                .ToArray();
             Assert.Equal(
-                10,
-                viewModel.Items
-                    .Select(item => (item.GridColumn, item.GridRow))
-                    .Distinct()
-                    .Count());
+                (0, 2),
+                (movedItem.GridColumn, movedItem.GridRow));
+            Assert.Contains(
+                persistedAfterDrag,
+                item => item.Id == movedItem.Id
+                    && item.GridColumn == 0
+                    && item.GridRow == 2);
+            window.UpdateLayout();
+            PumpDispatcher();
+
+            var initial = ReadVisibleItemLayout(window, viewModel);
+            Assert.Equal(10, initial.Count);
+            var expectedOrder = GetVisualOrder(initial);
+            Assert.Equal(
+                Enumerable.Range(2, 9)
+                    .Select(index => $"item-{index:00}")
+                    .Append("item-01"),
+                expectedOrder);
+
+            // Simulate the user's native edge resize through the public WPF window
+            // surface. The tall viewport keeps all ten real containers realized so
+            // the assertions observe their actual positions, not VM coordinates.
+            window.Width = 220;
+            window.UpdateLayout();
+            PumpDispatcher();
+            var narrow = ReadVisibleItemLayout(window, viewModel);
+
+            window.Width = 640;
+            window.UpdateLayout();
+            PumpDispatcher();
+            var wide = ReadVisibleItemLayout(window, viewModel);
+            var persistedAfterResize = drawerService
+                .GetItemsAsync(box.Id)
+                .GetAwaiter()
+                .GetResult()
+                .OrderBy(item => item.Id)
+                .Select(item => (item.Id, item.GridColumn, item.GridRow))
+                .ToArray();
+            var narrowVisual = GetVisualLayout(narrow);
+            var wideVisual = GetVisualLayout(wide);
+
+            Assert.Equal(expectedOrder, GetVisualOrder(narrow));
+            Assert.Equal(expectedOrder, GetVisualOrder(wide));
+            Assert.Equal(persistedAfterDrag, persistedAfterResize);
+            Assert.Equal(10, narrow.Count);
+            Assert.Equal(10, wide.Count);
+
+            var narrowRows = narrow.Select(item => item.Top).Distinct().Count();
+            var wideRows = wide.Select(item => item.Top).Distinct().Count();
+            Assert.True(
+                narrowRows > wideRows,
+                $"Expected a narrower window to use more rows, got {narrowRows} vs {wideRows}. " +
+                $"Narrow: {FormatItemLayout(narrow)}; wide: {FormatItemLayout(wide)}");
+            Assert.Equal(narrowVisual[0].Top, narrowVisual[1].Top, precision: 3);
+            Assert.True(
+                narrowVisual[^1].Top > narrowVisual[0].Top,
+                $"Expected the last item to wrap in the narrow window: {FormatItemLayout(narrow)}");
+            Assert.All(
+                narrow.Zip(narrow.Skip(1)),
+                pair => Assert.NotEqual(
+                    (pair.First.Left, pair.First.Top),
+                    (pair.Second.Left, pair.Second.Top)));
+            var overlappingItems = narrow
+                .SelectMany((item, index) => narrow
+                    .Skip(index + 1)
+                    .Where(other => Rect.Intersect(
+                        new Rect(item.Left, item.Top, item.Width, item.Height),
+                        new Rect(other.Left, other.Top, other.Width, other.Height))
+                        is { Width: > 1, Height: > 1 })
+                    .Select(other => (item.Name, other.Name)))
+                .ToArray();
+            Assert.Empty(overlappingItems);
+            Assert.Equal(wideVisual[0].Top, wideVisual[^1].Top, precision: 3);
         }
         finally
         {
@@ -741,20 +1281,7 @@ public sealed class DesktopProjectTodoTests
         }
     }
 
-    private static void AssertProjectFolderSizeControls(
-        DesktopBoxWindow window,
-        DesktopBoxViewModel viewModel)
-    {
-        Assert.IsType<Button>(window.FindName("ProjectFolderDecreaseColumnsButton"));
-        Assert.IsType<Button>(window.FindName("ProjectFolderIncreaseColumnsButton"));
-        Assert.IsType<Button>(window.FindName("ProjectFolderDecreaseRowsButton"));
-        Assert.IsType<Button>(window.FindName("ProjectFolderIncreaseRowsButton"));
-        var scrollViewer = Assert.IsType<ScrollViewer>(
-            window.FindName("ProjectFolderMemberScrollViewer"));
-        Assert.Equal(viewModel.ProjectFolderScrollMaxHeight, scrollViewer.MaxHeight);
-    }
-
-    private static void AssertBoundItemsVisible(
+    private static IReadOnlyList<(string Name, double Left, double Top, double Width, double Height)> ReadVisibleItemLayout(
         DesktopBoxWindow window,
         DesktopBoxViewModel viewModel)
     {
@@ -762,16 +1289,50 @@ public sealed class DesktopProjectTodoTests
         PumpDispatcher();
         var iconList = Assert.IsType<ListBox>(window.FindName("IconList"));
         Assert.Equal(10, iconList.Items.Count);
+        iconList.Items.Refresh();
         iconList.ScrollIntoView(iconList.Items[0]);
         window.UpdateLayout();
         PumpDispatcher();
-        var firstContainer = Assert.IsType<ListBoxItem>(
-            iconList.ItemContainerGenerator.ContainerFromIndex(0));
-        Assert.True(firstContainer.IsVisible);
-        Assert.True(firstContainer.ActualWidth > 0);
-        Assert.True(firstContainer.ActualHeight > 0);
+        var layout = new List<(string Name, double Left, double Top, double Width, double Height)>(
+            iconList.Items.Count);
+        for (var index = 0; index < iconList.Items.Count; index++)
+        {
+            var container = Assert.IsType<ListBoxItem>(
+                iconList.ItemContainerGenerator.ContainerFromIndex(index));
+            Assert.True(container.IsVisible);
+            Assert.True(container.ActualWidth > 0);
+            Assert.True(container.ActualHeight > 0);
+            var item = Assert.IsType<DrawerItemViewModel>(container.DataContext);
+            layout.Add((
+                item.DisplayName,
+                Canvas.GetLeft(container),
+                Canvas.GetTop(container),
+                container.ActualWidth,
+                container.ActualHeight));
+        }
+
         Assert.Equal(10, viewModel.Items.Count);
+        return layout;
     }
+
+    private static string FormatItemLayout(
+        IReadOnlyList<(string Name, double Left, double Top, double Width, double Height)> layout) =>
+        string.Join(
+            ", ",
+            layout.Select(item => $"{item.Name}@({item.Left:0.##},{item.Top:0.##})"));
+
+    private static string[] GetVisualOrder(
+        IReadOnlyList<(string Name, double Left, double Top, double Width, double Height)> layout) =>
+        GetVisualLayout(layout)
+            .Select(item => item.Name)
+            .ToArray();
+
+    private static IReadOnlyList<(string Name, double Left, double Top, double Width, double Height)> GetVisualLayout(
+        IReadOnlyList<(string Name, double Left, double Top, double Width, double Height)> layout) =>
+        layout
+            .OrderBy(item => item.Top)
+            .ThenBy(item => item.Left)
+            .ToArray();
 
     private static void AssertNoProjectProgressIndicators(DependencyObject root)
     {
@@ -1058,27 +1619,10 @@ public sealed class DesktopProjectTodoTests
 
             InvokeButton(actionsButton);
             WaitFor(() => popup.IsOpen, "The menu did not open while the title was hidden.");
-            var fixedSizeButton = FindVisualDescendant<Button>(
+            var legacyFixedSizeButton = FindVisualDescendant<Button>(
                 Assert.IsAssignableFrom<Visual>(popup.Child),
                 button => string.Equals(button.Content as string, "固定", StringComparison.Ordinal));
-            Assert.NotNull(fixedSizeButton);
-            InvokeButton(fixedSizeButton);
-            WaitFor(
-                () => window.ViewModel.IsFixedSize,
-                "The managed desktop actions menu did not execute the fixed-size action.");
-            Assert.True(popup.IsOpen, "A size button click unexpectedly closed the actions menu.");
-
-            var initialColumns = window.ViewModel.SizeMode.Columns;
-            var increaseColumnsButton = FindVisualDescendant<Button>(
-                Assert.IsAssignableFrom<Visual>(popup.Child),
-                button => Grid.GetRow(button) == 0
-                    && Grid.GetColumn(button) == 2
-                    && string.Equals(button.Content as string, "+", StringComparison.Ordinal));
-            Assert.NotNull(increaseColumnsButton);
-            InvokeButton(increaseColumnsButton);
-            WaitFor(
-                () => window.ViewModel.SizeMode.Columns == initialColumns + 1,
-                "The managed desktop actions menu did not execute the increase-width action.");
+            Assert.Null(legacyFixedSizeButton);
             Assert.True(popup.IsOpen);
 
             var renameButton = FindVisualDescendant<Button>(
@@ -1443,18 +1987,16 @@ public sealed class DesktopProjectTodoTests
         });
     }
 
-    private static void AssertDesktopPaperManagerWindowLoads()
+    private static void AssertDesktopPaperManagerWindowArchivesPaper()
     {
-        var viewModel = new DesktopPaperManagerViewModel(
-            new StaticDesktopPaperService(
-            [
-                new DesktopPaperSummary(
-                    "hidden-note",
-                    "已隐藏笔记",
-                    "笔记便签",
-                    "12 个字符",
-                    false)
-            ]));
+        var service = new ArchivableDesktopPaperService(
+            new DesktopPaperSummary(
+                "hidden-note",
+                "已隐藏笔记",
+                "笔记便签",
+                "12 个字符",
+                false));
+        var viewModel = new DesktopPaperManagerViewModel(service);
         var window = new DesktopPaperManagerWindow(viewModel)
         {
             Left = -10000,
@@ -1477,10 +2019,102 @@ public sealed class DesktopProjectTodoTests
                     button.ToolTip as string,
                     "永久删除所有已隐藏的便签",
                     StringComparison.Ordinal)));
+            var archiveButton = FindVisualDescendant<Button>(
+                window,
+                button => string.Equals(
+                    button.ToolTip as string,
+                    "归档到归档区",
+                    StringComparison.Ordinal));
+            Assert.NotNull(archiveButton);
+
+            archiveButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            PumpDispatcher();
+
+            Assert.Empty(viewModel.Papers);
+            Assert.Equal(["hidden-note"], service.ArchivedPaperIds);
         }
         finally
         {
             window.Close();
+        }
+    }
+
+    private static void AssertMainArchivePageShowsDesktopPapers(
+        DrawerService drawerService,
+        DrawerRepository repository,
+        string root)
+    {
+        var logger = new NoOpLogger();
+        var launcher = new NoOpFileLauncher();
+        var visualStyleStore = new BoxVisualStyleStore(drawerService, logger);
+        var quickPanelViewModel = new QuickPanelViewModel(
+            drawerService,
+            launcher,
+            logger,
+            visualStyleStore);
+        var paperService = new ArchivePageDesktopPaperService(
+            new DesktopPaperSummary(
+                "archived-paper",
+                "归档区便签",
+                "笔记便签",
+                "5 个字符",
+                false));
+        var paths = new AppPaths(root);
+        var viewModel = new MainViewModel(
+            drawerService,
+            new TodoService(repository),
+            launcher,
+            logger,
+            quickPanelViewModel,
+            new UpdateService(logger),
+            visualStyleStore,
+            new BoxPositionLockStateStore(drawerService, logger),
+            paths,
+            new DataStorageMigrationService(
+                paths,
+                repository,
+                new StorageLocationStore(Path.Combine(root, "storage-location.json"))),
+            paperTodoHost: paperService);
+        viewModel.ShowArchiveCommand.ExecuteAsync(null).GetAwaiter().GetResult();
+        using var paperTodoHost = new PaperTodoHost(Path.Combine(root, "paper-host"), logger);
+        var quickPanelWindow = new QuickPanelWindow(quickPanelViewModel);
+        var window = new MainWindow(
+            viewModel,
+            quickPanelWindow,
+            logger,
+            new QuickPanelHotKeySettingsStore(drawerService),
+            QuickPanelHotKey.Default,
+            paperTodoHost)
+        {
+            Left = -10000,
+            Top = -10000,
+            ShowInTaskbar = false
+        };
+
+        try
+        {
+            window.Show();
+            window.UpdateLayout();
+            PumpDispatcher();
+
+            var archivedPaperList = FindVisualDescendant<ListBox>(
+                window,
+                list => ReferenceEquals(list.ItemsSource, viewModel.ArchivedPapers));
+            Assert.NotNull(archivedPaperList);
+            Assert.NotNull(FindVisualDescendant<Button>(
+                archivedPaperList,
+                button => ReferenceEquals(
+                    button.Command,
+                    viewModel.RestoreArchivedPaperCommand)));
+            Assert.NotNull(FindVisualDescendant<Button>(
+                archivedPaperList,
+                button => ReferenceEquals(
+                    button.Command,
+                    viewModel.DeleteArchivedPaperCommand)));
+        }
+        finally
+        {
+            window.ForceClose();
         }
     }
 
@@ -1505,6 +2139,13 @@ public sealed class DesktopProjectTodoTests
             System.Windows.Threading.DispatcherPriority.Background);
     }
 
+    private static void PumpRenderFrame()
+    {
+        System.Windows.Threading.Dispatcher.CurrentDispatcher.Invoke(
+            () => { },
+            System.Windows.Threading.DispatcherPriority.Render);
+    }
+
     private static void InitializeWindowTestResources(Application application)
     {
         application.Resources["BooleanToVisibilityConverter"] =
@@ -1513,6 +2154,10 @@ public sealed class DesktopProjectTodoTests
             new InverseBooleanToVisibilityConverter();
         application.Resources["ZeroToVisibilityConverter"] =
             new ZeroToVisibilityConverter();
+        application.Resources["NonEmptyToVisibilityConverter"] =
+            new NonEmptyToVisibilityConverter();
+        application.Resources["BoxVisualStyleEqualityConverter"] =
+            new BoxVisualStyleEqualityConverter();
         application.Resources["NoteHeadingFontSizeConverter"] =
             new NoteHeadingFontSizeConverter();
         application.Resources["NoteHeadingFontWeightConverter"] =
@@ -1523,6 +2168,8 @@ public sealed class DesktopProjectTodoTests
         application.Resources["TodoArchiveButtonStyle"] = new Style(typeof(Button));
         application.Resources["TodoCompletionButtonStyle"] = new Style(typeof(Button));
         application.Resources["DrawerTileButtonStyle"] = new Style(typeof(Button));
+        application.Resources["DrawerScrollBarStyle"] =
+            new Style(typeof(System.Windows.Controls.Primitives.ScrollBar));
         application.Resources["GhostButtonStyle"] = new Style(typeof(Button));
         application.Resources["DangerButtonStyle"] = new Style(typeof(Button));
         application.Resources["PrimaryButtonStyle"] = new Style(typeof(Button));
@@ -1607,16 +2254,68 @@ public sealed class DesktopProjectTodoTests
         public void Error(Exception exception, string message) { }
     }
 
-    private sealed class StaticDesktopPaperService(
-        IReadOnlyList<DesktopPaperSummary> papers) : IDesktopPaperService
+    private sealed class ArchivableDesktopPaperService(
+        DesktopPaperSummary paper) : IDesktopPaperService
     {
-        public IReadOnlyList<DesktopPaperSummary> GetPapers() => papers;
+        private DesktopPaperSummary? _paper = paper;
+
+        public List<string> ArchivedPaperIds { get; } = [];
+
+        public void CreateTodoPaper() { }
+
+        public void CreateNotePaper() { }
+
+        public IReadOnlyList<DesktopPaperSummary> GetPapers() =>
+            _paper is null ? [] : [_paper];
+
+        public IReadOnlyList<DesktopPaperSummary> GetArchivedPapers() => [];
 
         public bool ShowPaper(string paperId) => false;
+
+        public bool ArchivePaper(string paperId)
+        {
+            if (_paper?.Id != paperId)
+            {
+                return false;
+            }
+
+            ArchivedPaperIds.Add(paperId);
+            _paper = null;
+            return true;
+        }
 
         public bool DeletePaper(string paperId) => false;
 
         public int DeleteHiddenPapers() => 0;
+
+        public IReadOnlyList<string> ArchivePapers(IEnumerable<string> paperIds) =>
+            paperIds.Where(ArchivePaper).ToArray();
+
+        public IReadOnlyList<string> RestoreArchivedPapers(IEnumerable<string> paperIds) => [];
+    }
+
+    private sealed class ArchivePageDesktopPaperService(
+        DesktopPaperSummary archivedPaper) : IDesktopPaperService
+    {
+        public void CreateTodoPaper() { }
+
+        public void CreateNotePaper() { }
+
+        public IReadOnlyList<DesktopPaperSummary> GetPapers() => [];
+
+        public IReadOnlyList<DesktopPaperSummary> GetArchivedPapers() => [archivedPaper];
+
+        public bool ShowPaper(string paperId) => false;
+
+        public bool ArchivePaper(string paperId) => false;
+
+        public bool DeletePaper(string paperId) => false;
+
+        public int DeleteHiddenPapers() => 0;
+
+        public IReadOnlyList<string> ArchivePapers(IEnumerable<string> paperIds) => [];
+
+        public IReadOnlyList<string> RestoreArchivedPapers(IEnumerable<string> paperIds) => [];
     }
 
     private sealed class StaticProjectTodoCountProvider(
@@ -1668,6 +2367,87 @@ public sealed class DesktopProjectTodoTests
         int width,
         int height,
         uint flags);
+
+    private static nint MakeScreenPointLParam(int x, int y) =>
+        unchecked((nint)(int)(((y & 0xFFFF) << 16) | (x & 0xFFFF)));
+
+    private static nint MakeMessageLParam(int lowWord, int highWord) =>
+        unchecked((nint)(int)(((highWord & 0xFFFF) << 16) | (lowWord & 0xFFFF)));
+
+    private static void PerformNativeLeftResize(
+        nint windowHandle,
+        NativeRect currentRectangle)
+    {
+        const uint wmEnterSizeMove = 0x0231;
+        const uint wmSizing = 0x0214;
+        const uint wmExitSizeMove = 0x0232;
+        const int wmszLeft = 1;
+        const uint swpNoZOrder = 0x0004;
+        const uint swpNoActivate = 0x0010;
+        var targetRectangle = new NativeRect
+        {
+            Left = currentRectangle.Left - 160,
+            Top = currentRectangle.Top,
+            Right = currentRectangle.Right,
+            Bottom = currentRectangle.Bottom,
+        };
+        var rectangleBuffer = Marshal.AllocHGlobal(Marshal.SizeOf<NativeRect>());
+        try
+        {
+            Marshal.StructureToPtr(targetRectangle, rectangleBuffer, false);
+            SendMessage(
+                windowHandle,
+                wmEnterSizeMove,
+                nint.Zero,
+                nint.Zero);
+            SendMessage(
+                windowHandle,
+                wmSizing,
+                (nint)wmszLeft,
+                rectangleBuffer);
+            Assert.True(
+                SetWindowPos(
+                    windowHandle,
+                    nint.Zero,
+                    targetRectangle.Left,
+                    targetRectangle.Top,
+                    targetRectangle.Right - targetRectangle.Left,
+                    targetRectangle.Bottom - targetRectangle.Top,
+                    swpNoZOrder | swpNoActivate),
+                $"SetWindowPos failed with Win32 error {Marshal.GetLastWin32Error()}.");
+            SendMessage(
+                windowHandle,
+                wmExitSizeMove,
+                nint.Zero,
+                nint.Zero);
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(rectangleBuffer);
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeRect
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool GetWindowRect(nint windowHandle, out NativeRect rectangle);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool GetClientRect(nint windowHandle, out NativeRect rectangle);
+
+    [DllImport("user32.dll")]
+    private static extern nint SendMessage(
+        nint windowHandle,
+        uint message,
+        nint wordParameter,
+        nint longParameter);
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]

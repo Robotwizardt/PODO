@@ -2629,6 +2629,9 @@ public sealed partial class PaperWindow : Window
                 (_, _) => DetachExperimentalWindowAttachment(savePosition: true)));
         }
 
+        menu.Items.Add(MenuItem(
+            Strings.Get("MenuArchive"),
+            (_, _) => _controller.SetPapersArchived([_paper.Id], isArchived: true)));
         menu.Items.Add(MenuItem(Strings.Get("MenuHide"), (_, _) => _controller.HidePaper(_paper)));
         menu.Items.Add(MenuItem(
             Strings.Get("MenuDelete"),

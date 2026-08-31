@@ -3,14 +3,14 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:infrastructure="clr-namespace:WitchDrawer.App.Infrastructure"
         Title="WitchDrawer Quick Panel"
-        Icon="/Assets/app.png"
+        Icon="pack://application:,,,/PODO;component/Assets/app.png"
         Width="780"
         Height="520"
         MinWidth="540"
         MinHeight="380"
         WindowStartupLocation="CenterScreen"
         WindowStyle="None"
-        AllowsTransparency="True"
+        AllowsTransparency="False"
         ResizeMode="NoResize"
         ShowInTaskbar="False"
         Topmost="True"
@@ -18,12 +18,13 @@
         KeyDown="OnKeyDown">
 
     <Border Margin="15"
-            Background="{DynamicResource GlassSurfaceBrush}"
-            BorderBrush="{DynamicResource GlassStrokeBrush}"
+            Background="{DynamicResource AcrylicSurfaceBrush}"
+            BorderBrush="{DynamicResource AcrylicStrokeBrush}"
             BorderThickness="1"
-            CornerRadius="22">
+            CornerRadius="{DynamicResource WindowCornerRadius}"
+            ClipToBounds="True">
         <Border.Effect>
-            <DropShadowEffect BlurRadius="16" Color="#000000" Opacity="0.20" ShadowDepth="3" Direction="270" />
+            <DropShadowEffect BlurRadius="18" Color="#000000" Opacity="0.14" ShadowDepth="3" Direction="270" />
         </Border.Effect>
         
         <Grid>
@@ -32,6 +33,14 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
+
+            <Border Grid.RowSpan="2"
+                    Margin="1"
+                    BorderBrush="{DynamicResource GlassHighlightBrush}"
+                    BorderThickness="1,1,0,0"
+                     CornerRadius="16"
+                    IsHitTestVisible="False"
+                    Opacity="0.68" />
 
             <!-- 搜索框区域 -->
             <Border Grid.Row="0"
@@ -115,7 +124,7 @@
                             BorderThickness="0.8">
                         <TextBlock VerticalAlignment="Center"
                                    HorizontalAlignment="Center"
-                                   FontSize="11.5"
+                                    FontSize="{DynamicResource CaptionFontSize}"
                                    FontWeight="SemiBold"
                                    Foreground="{DynamicResource TextMutedBrush}"
                                    Text="{Binding StatusText}" />
@@ -132,24 +141,33 @@
                      ScrollViewer.CanContentScroll="True"
                      VirtualizingPanel.IsVirtualizing="True"
                      VirtualizingPanel.VirtualizationMode="Recycling"
-                     FocusVisualStyle="{x:Null}">
+                     FocusVisualStyle="{DynamicResource AppFocusVisualStyle}"
+                     AutomationProperties.Name="快捷搜索结果">
                 <ListBox.ItemContainerStyle>
                     <Style TargetType="{x:Type ListBoxItem}">
                         <Setter Property="MinHeight" Value="52" />
                         <Setter Property="Padding" Value="8,6" />
                         <Setter Property="Margin" Value="0,2" />
-                        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+                        <Setter Property="FocusVisualStyle" Value="{DynamicResource AppFocusVisualStyle}" />
                         <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                        <Setter Property="RenderTransformOrigin" Value="0.5,0.5" />
+                        <Setter Property="RenderTransform">
+                            <Setter.Value>
+                                <TranslateTransform />
+                            </Setter.Value>
+                        </Setter>
+                        <EventSetter Event="MouseEnter" Handler="OnHoverCardMouseEnter" />
+                        <EventSetter Event="MouseLeave" Handler="OnHoverCardMouseLeave" />
                         <Setter Property="Template">
                             <Setter.Value>
                                 <ControlTemplate TargetType="{x:Type ListBoxItem}">
-                                    <Border x:Name="Root"
-                                            Background="Transparent"
-                                            BorderBrush="Transparent"
-                                            BorderThickness="0"
-                                            CornerRadius="10"
-                                            Padding="{TemplateBinding Padding}">
-                                        <Grid>
+                                     <Border x:Name="Root"
+                                             Background="Transparent"
+                                             BorderBrush="Transparent"
+                                              BorderThickness="1"
+                                              CornerRadius="{DynamicResource SurfaceCornerRadius}"
+                                             Padding="{TemplateBinding Padding}">
+                                         <Grid>
                                             <!-- 左侧高亮蓝色指示胶囊 -->
                                             <Border x:Name="Indicator" 
                                                     Width="3.5" 
@@ -166,14 +184,20 @@
                                         </Grid>
                                     </Border>
                                     <ControlTemplate.Triggers>
-                                        <Trigger Property="IsMouseOver" Value="True">
-                                            <Setter TargetName="Root" Property="Background" Value="{DynamicResource HoverBrush}" />
-                                        </Trigger>
+                                         <Trigger Property="IsMouseOver" Value="True">
+                                             <Setter TargetName="Root" Property="Background" Value="{DynamicResource HoverBrush}" />
+                                             <Setter TargetName="Root" Property="BorderBrush" Value="{DynamicResource GlassStrokeBrush}" />
+                                         </Trigger>
                                         <Trigger Property="IsSelected" Value="True">
                                             <Setter TargetName="Root" Property="Background" Value="{DynamicResource AccentSoftBrush}" />
+                                            <Setter TargetName="Root" Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
                                             <Setter TargetName="Indicator" Property="Opacity" Value="1" />
                                         </Trigger>
-                                    </ControlTemplate.Triggers>
+                                         <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                                             <Setter TargetName="Root" Property="BorderBrush" Value="{DynamicResource FocusRingBrush}" />
+                                             <Setter TargetName="Root" Property="BorderThickness" Value="2" />
+                                         </Trigger>
+                                     </ControlTemplate.Triggers>
                                 </ControlTemplate>
                             </Setter.Value>
                         </Setter>
@@ -233,7 +257,7 @@
                                             Padding="4,1"
                                             SnapsToDevicePixels="True">
                                         <TextBlock Text="{Binding BoxName}"
-                                                   FontSize="10"
+                                                    FontSize="{DynamicResource CaptionFontSize}"
                                                    FontWeight="Bold"
                                                    Foreground="{DynamicResource AccentBrush}" />
                                     </Border>
@@ -241,7 +265,7 @@
                                     <!-- 路径 -->
                                     <TextBlock Text="{Binding ShortPathLabel}"
                                                Margin="8,0,0,0"
-                                               FontSize="11"
+                                                FontSize="{DynamicResource CaptionFontSize}"
                                                VerticalAlignment="Center"
                                                Foreground="{DynamicResource TextMutedBrush}"
                                                TextTrimming="CharacterEllipsis" />
@@ -255,8 +279,9 @@
                                     CommandParameter="{Binding}"
                                     VerticalAlignment="Center"
                                     Focusable="False"
-                                    Foreground="{DynamicResource TextMutedBrush}"
-                                    Cursor="Hand">
+                                     Foreground="{DynamicResource TextMutedBrush}"
+                                     Cursor="Hand"
+                                     AutomationProperties.Name="打开搜索结果">
                                 <Button.Template>
                                     <ControlTemplate TargetType="Button">
                                         <Border x:Name="BtnBorder" 
@@ -264,9 +289,9 @@
                                                 BorderThickness="1" 
                                                 CornerRadius="4" 
                                                 Padding="6,3" 
-                                                Background="{DynamicResource PanelBrush}">
+                                                 Background="{DynamicResource GlassControlBrush}">
                                             <TextBlock Text="⏎ Enter" 
-                                                       FontSize="9.5" 
+                                                        FontSize="{DynamicResource CaptionFontSize}"
                                                        Foreground="{Binding Foreground, RelativeSource={RelativeSource TemplatedParent}}" 
                                                        FontWeight="SemiBold" />
                                         </Border>
@@ -274,7 +299,7 @@
                                             <Trigger Property="IsMouseOver" Value="True">
                                                 <Setter TargetName="BtnBorder" Property="Background" Value="{DynamicResource AccentBrush}"/>
                                                 <Setter TargetName="BtnBorder" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
-                                                <Setter Property="Foreground" Value="White"/>
+                                                 <Setter Property="Foreground" Value="{DynamicResource OnAccentBrush}"/>
                                             </Trigger>
                                         </ControlTemplate.Triggers>
                                     </ControlTemplate>

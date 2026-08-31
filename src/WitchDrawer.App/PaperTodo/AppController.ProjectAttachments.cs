@@ -107,6 +107,41 @@ public sealed partial class AppController
         return true;
     }
 
+    /// <summary>
+    /// Moves an already-present project paper during its owner's native drag.
+    /// This is intentionally presentation-only: the normal debounced PaperTodo
+    /// save remains responsible for persisting the final position after release.
+    /// </summary>
+    public bool TryOffsetProjectAttachmentPresentation(
+        string paperId,
+        double deltaLeft,
+        double deltaTop)
+    {
+        if (!double.IsFinite(deltaLeft) || !double.IsFinite(deltaTop))
+        {
+            return false;
+        }
+
+        var paper = State.Papers.FirstOrDefault(item =>
+            string.Equals(item.Id, paperId, StringComparison.Ordinal));
+        if (paper is null || paper.IsArchived)
+        {
+            return false;
+        }
+
+        // Keep sub-DIP motion in memory while the owning box is being dragged.
+        // The release-time layout still uses the normal rounded persistence path.
+        paper.X += deltaLeft;
+        paper.Y += deltaTop;
+        if (_windows.TryGetValue(paper.Id, out var window) && !window.IsClosed)
+        {
+            window.Left = paper.X;
+            window.Top = paper.Y;
+        }
+
+        return true;
+    }
+
     public IReadOnlyList<string> SetPapersArchived(
         IEnumerable<string> paperIds,
         bool isArchived)

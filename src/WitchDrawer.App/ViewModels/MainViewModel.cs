@@ -34,7 +34,7 @@ public sealed class MainViewModel : ObservableObject
     private readonly BoxPositionLockStateStore _boxPositionLockStateStore;
     private readonly AppPaths _appPaths;
     private readonly DataStorageMigrationService _dataStorageMigrationService;
-    private readonly PaperTodoHost? _paperTodoHost;
+    private readonly IDesktopPaperService? _paperTodoHost;
     private readonly FileDialogAccessSettingsStore? _fileDialogAccessSettings;
     private BoxViewModel? _selectedBox;
     private CancellationTokenSource? _itemsLoadCts;
@@ -59,6 +59,7 @@ public sealed class MainViewModel : ObservableObject
     private string? _pendingUpdateSha256;
     private double _iconDpiScaleX = 1;
     private double _iconDpiScaleY = 1;
+    private HashSet<string> _archivedProjectPaperIds = new(StringComparer.Ordinal);
 
     public MainViewModel(
         DrawerService drawerService,
@@ -72,7 +73,7 @@ public sealed class MainViewModel : ObservableObject
         AppPaths appPaths,
         DataStorageMigrationService dataStorageMigrationService,
         ProjectService? projectService = null,
-        PaperTodoHost? paperTodoHost = null,
+        IDesktopPaperService? paperTodoHost = null,
         FileDialogAccessSettingsStore? fileDialogAccessSettings = null)
     {
         _drawerService = drawerService;
@@ -99,7 +100,6 @@ public sealed class MainViewModel : ObservableObject
         TodoBoxDetail = new TodoBoxDetailViewModel(todoService, logger);
         TodoBoxDetail.ItemsChanged += OnTodoBoxDetailItemsChanged;
         ProjectManagement = new ProjectManagementViewModel(_projectService, logger);
-        BoxSizeSettings = new BoxSizeSettingsViewModel(drawerService, logger);
         WeakReferenceMessenger.Default.Register<MainViewModel, BoxCollectionChangedMessage>(
             this,
             static (recipient, _) => recipient.QueueExternalBoxCollectionReload());
@@ -134,6 +134,8 @@ public sealed class MainViewModel : ObservableObject
         RestoreArchivedTodoCommand = new AsyncRelayCommand<ArchivedTodoItemViewModel?>(RestoreArchivedTodoAsync);
         DeleteArchivedTodoCommand = new AsyncRelayCommand<ArchivedTodoItemViewModel?>(DeleteArchivedTodoAsync);
         RestoreArchivedProjectCommand = new AsyncRelayCommand<ArchivedProjectViewModel?>(RestoreArchivedProjectAsync);
+        RestoreArchivedPaperCommand = new AsyncRelayCommand<DesktopPaperSummary?>(RestoreArchivedPaperAsync);
+        DeleteArchivedPaperCommand = new AsyncRelayCommand<DesktopPaperSummary?>(DeleteArchivedPaperAsync);
         SetCurrentTheme(AppThemeManager.CurrentTheme);
 
         ApplyMoeThemeCommand = new AsyncRelayCommand(() => ApplyThemeAsync(AppTheme.Moe));
@@ -182,11 +184,11 @@ public sealed class MainViewModel : ObservableObject
 
     public ObservableCollection<ArchivedProjectViewModel> ArchivedProjects { get; } = [];
 
+    public ObservableCollection<DesktopPaperSummary> ArchivedPapers { get; } = [];
+
     public TodoBoxDetailViewModel TodoBoxDetail { get; }
 
     public ProjectManagementViewModel ProjectManagement { get; }
-
-    public BoxSizeSettingsViewModel BoxSizeSettings { get; }
 
     public IReadOnlyList<BoxVisualStyleOption> BoxVisualStyleOptions =>
         BoxVisualStyleCatalog.Options;
@@ -239,6 +241,10 @@ public sealed class MainViewModel : ObservableObject
     public IAsyncRelayCommand<ArchivedTodoItemViewModel?> DeleteArchivedTodoCommand { get; }
 
     public IAsyncRelayCommand<ArchivedProjectViewModel?> RestoreArchivedProjectCommand { get; }
+
+    public IAsyncRelayCommand<DesktopPaperSummary?> RestoreArchivedPaperCommand { get; }
+
+    public IAsyncRelayCommand<DesktopPaperSummary?> DeleteArchivedPaperCommand { get; }
 
     public IAsyncRelayCommand ApplyMoeThemeCommand { get; }
 
@@ -508,6 +514,7 @@ public sealed class MainViewModel : ObservableObject
             {
                 await LoadArchivedTodosAsync();
                 await LoadArchivedProjectsAsync();
+                LoadArchivedPapers();
             }
             if (affectedBoxId is Guid boxId)
             {
@@ -620,23 +627,8 @@ public sealed class MainViewModel : ObservableObject
 
         await RunBusyAsync(async () =>
         {
-            // 固定格数盒的硬约束：主窗口导入同样不得超容量（桌面盒拖入路径已有同等约束）。
-            // 超容量的项目若入库，会因无格位被分配到固定边界外，在盒内不可见也不可选。
-            var pathsToImport = pathList;
-            var skippedForCapacity = 0;
-            if (selectedBox.SupportsFixedSize && BoxSizeSettings.IsFixedMode)
-            {
-                var capacity = BoxSizeSettings.FixedColumns * BoxSizeSettings.FixedRows;
-                var remaining = Math.Max(0, capacity - Items.Count);
-                if (remaining < pathList.Length)
-                {
-                    pathsToImport = pathList.Take(remaining).ToArray();
-                    skippedForCapacity = pathList.Length - pathsToImport.Length;
-                }
-            }
-
             var imported = 0;
-            foreach (var path in pathsToImport)
+            foreach (var path in pathList)
             {
                 await _drawerService.ImportPathAsync(selectedBox.Id, path);
                 imported++;
@@ -644,11 +636,7 @@ public sealed class MainViewModel : ObservableObject
 
             await LoadItemsForSelectedBoxAsync(selectedBox);
             await _quickPanelViewModel.RefreshBoxAsync(selectedBox.Id);
-            StatusText = skippedForCapacity > 0
-                ? imported > 0
-                    ? $"已导入 {imported} 项到 {selectedBox.Name}，盒子已满（{skippedForCapacity} 项未导入）"
-                    : $"{selectedBox.Name} 已满，无法导入"
-                : $"已导入 {imported} 项到 {selectedBox.Name}";
+            StatusText = $"已导入 {imported} 项到 {selectedBox.Name}";
             ItemsChanged?.Invoke(this, new BoxItemsChangedEventArgs(selectedBox.Id));
         });
     }
@@ -957,7 +945,6 @@ public sealed class MainViewModel : ObservableObject
         }
 
         _selectedBox = value;
-        BoxSizeSettings.SetTargetBox(value);
         OnPropertyChanged(nameof(SelectedBox));
         OnPropertyChanged(nameof(IsSelectedTodoBox));
         OnPropertyChanged(nameof(IsSelectedNoteBox));
@@ -1146,6 +1133,7 @@ public sealed class MainViewModel : ObservableObject
         IsAboutPage = false;
         await LoadArchivedTodosAsync();
         await LoadArchivedProjectsAsync();
+        LoadArchivedPapers();
     }
 
     private async Task ArchiveSelectedProjectAsync()
@@ -1179,6 +1167,7 @@ public sealed class MainViewModel : ObservableObject
             IsAboutPage = false;
             await LoadArchivedTodosAsync();
             await LoadArchivedProjectsAsync();
+            LoadArchivedPapers();
             StatusText = $"已归档项目“{selectedBox.Name}”及其关联内容";
             BoxesChanged?.Invoke(this, EventArgs.Empty);
         });
@@ -1209,6 +1198,7 @@ public sealed class MainViewModel : ObservableObject
             await _quickPanelViewModel.LoadAsync();
             await LoadArchivedTodosAsync();
             await LoadArchivedProjectsAsync();
+            LoadArchivedPapers();
             StatusText = $"已恢复项目“{project.Name}”及其关联内容";
             BoxesChanged?.Invoke(this, EventArgs.Empty);
         });
@@ -1233,6 +1223,37 @@ public sealed class MainViewModel : ObservableObject
             StatusText = $"已将“{todo.Title}”恢复到 {todo.BoxName}";
             ItemsChanged?.Invoke(this, new BoxItemsChangedEventArgs(todo.Model.BoxId));
         });
+    }
+
+    private Task RestoreArchivedPaperAsync(DesktopPaperSummary? paper)
+    {
+        if (paper is null || _paperTodoHost is null)
+        {
+            return Task.CompletedTask;
+        }
+
+        var restoredPaperIds = _paperTodoHost.RestoreArchivedPapers([paper.Id]);
+        if (!restoredPaperIds.Contains(paper.Id, StringComparer.Ordinal))
+        {
+            return Task.CompletedTask;
+        }
+
+        _paperTodoHost.ShowPaper(paper.Id);
+        LoadArchivedPapers();
+        StatusText = $"已恢复桌面便签“{paper.Title}”";
+        return Task.CompletedTask;
+    }
+
+    private Task DeleteArchivedPaperAsync(DesktopPaperSummary? paper)
+    {
+        if (paper is null || _paperTodoHost?.DeletePaper(paper.Id) != true)
+        {
+            return Task.CompletedTask;
+        }
+
+        LoadArchivedPapers();
+        StatusText = $"已永久删除归档便签“{paper.Title}”";
+        return Task.CompletedTask;
     }
 
     private async Task DeleteArchivedTodoAsync(ArchivedTodoItemViewModel? todo)
@@ -1285,10 +1306,13 @@ public sealed class MainViewModel : ObservableObject
                     group => group.First().Title,
                     StringComparer.Ordinal);
             var projectViewModels = new List<ArchivedProjectViewModel>(archivedProjects.Length);
+            var archivedProjectPaperIds = new HashSet<string>(StringComparer.Ordinal);
 
             foreach (var project in archivedProjects)
             {
                 var snapshot = await _projectService.GetProjectArchiveSnapshotAsync(project.Id);
+                archivedProjectPaperIds.UnionWith(
+                    snapshot.LinkedPapers.Select(link => link.PaperId));
                 var linkedBoxNames = snapshot.LinkedBoxes
                     .Select(link => link.LinkedBoxName)
                     .ToArray();
@@ -1304,10 +1328,31 @@ public sealed class MainViewModel : ObservableObject
             {
                 ArchivedProjects.Add(project);
             }
+
+            _archivedProjectPaperIds = archivedProjectPaperIds;
         }
         catch (Exception exception)
         {
+            _archivedProjectPaperIds.Clear();
             _logger.Error(exception, "Failed to load archived projects.");
+            StatusText = exception.Message;
+        }
+    }
+
+    private void LoadArchivedPapers()
+    {
+        try
+        {
+            ArchivedPapers.Clear();
+            foreach (var paper in (_paperTodoHost?.GetArchivedPapers() ?? [])
+                         .Where(paper => !_archivedProjectPaperIds.Contains(paper.Id)))
+            {
+                ArchivedPapers.Add(paper);
+            }
+        }
+        catch (Exception exception)
+        {
+            _logger.Error(exception, "Failed to load archived desktop papers.");
             StatusText = exception.Message;
         }
     }

@@ -43,6 +43,24 @@ public sealed class DesktopPaperManagerViewModelTests
     }
 
     [Fact]
+    public void ArchivePaper_RemovesThePaperFromDesktopManagement()
+    {
+        var service = new FakeDesktopPaperService(
+        [
+            new DesktopPaperSummary("paper-to-archive", "准备归档", "待办便签", "1 项待办未完成", true)
+        ]);
+        var viewModel = new DesktopPaperManagerViewModel(service);
+        viewModel.Refresh();
+
+        var archived = viewModel.ArchivePaper(viewModel.Papers.Single());
+
+        Assert.True(archived);
+        Assert.Empty(viewModel.Papers);
+        Assert.Equal(["paper-to-archive"], service.ArchivedPaperIds);
+        Assert.Equal("已归档到归档区", viewModel.StatusText);
+    }
+
+    [Fact]
     public void DeleteHiddenPapers_RemovesOnlyHiddenPapers()
     {
         var service = new FakeDesktopPaperService(
@@ -70,13 +88,25 @@ public sealed class DesktopPaperManagerViewModelTests
 
         public List<string> DeletedPaperIds { get; } = [];
 
+        public List<string> ArchivedPaperIds { get; } = [];
+
         public string? LastShownPaperId { get; private set; }
+
+        public void CreateTodoPaper()
+        {
+        }
+
+        public void CreateNotePaper()
+        {
+        }
 
         public IReadOnlyList<DesktopPaperSummary> GetPapers() =>
             _papers
                 .OrderBy(paper => paper.IsVisible)
                 .ThenBy(paper => paper.Title, StringComparer.CurrentCultureIgnoreCase)
                 .ToArray();
+
+        public IReadOnlyList<DesktopPaperSummary> GetArchivedPapers() => [];
 
         public bool ShowPaper(string paperId)
         {
@@ -104,6 +134,19 @@ public sealed class DesktopPaperManagerViewModelTests
             return true;
         }
 
+        public bool ArchivePaper(string paperId)
+        {
+            var index = _papers.FindIndex(paper => paper.Id == paperId);
+            if (index < 0)
+            {
+                return false;
+            }
+
+            ArchivedPaperIds.Add(paperId);
+            _papers.RemoveAt(index);
+            return true;
+        }
+
         public int DeleteHiddenPapers()
         {
             var hiddenPaperIds = _papers
@@ -117,5 +160,10 @@ public sealed class DesktopPaperManagerViewModelTests
 
             return hiddenPaperIds.Length;
         }
+
+        public IReadOnlyList<string> ArchivePapers(IEnumerable<string> paperIds) =>
+            paperIds.Where(ArchivePaper).ToArray();
+
+        public IReadOnlyList<string> RestoreArchivedPapers(IEnumerable<string> paperIds) => [];
     }
 }

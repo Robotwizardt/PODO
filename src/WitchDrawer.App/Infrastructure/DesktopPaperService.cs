@@ -7,13 +7,25 @@ namespace WitchDrawer.App.Infrastructure;
 /// </summary>
 public interface IDesktopPaperService
 {
+    void CreateTodoPaper();
+
+    void CreateNotePaper();
+
     IReadOnlyList<DesktopPaperSummary> GetPapers();
 
+    IReadOnlyList<DesktopPaperSummary> GetArchivedPapers();
+
     bool ShowPaper(string paperId);
+
+    bool ArchivePaper(string paperId);
 
     bool DeletePaper(string paperId);
 
     int DeleteHiddenPapers();
+
+    IReadOnlyList<string> ArchivePapers(IEnumerable<string> paperIds);
+
+    IReadOnlyList<string> RestoreArchivedPapers(IEnumerable<string> paperIds);
 }
 
 public sealed record DesktopPaperSummary(

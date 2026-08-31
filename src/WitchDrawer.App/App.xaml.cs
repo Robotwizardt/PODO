@@ -272,7 +272,7 @@ public partial class App : Application
         var savedTheme = await drawerService.GetSettingAsync(ThemeSettingKey);
         return Enum.TryParse<AppTheme>(savedTheme, ignoreCase: true, out var theme)
             ? theme
-            : AppTheme.Moe;
+            : AppTheme.Glass;
     }
 
     private static async Task GuardRefreshAsync(Func<Task> refresh, string operationName, IAppLogger logger)

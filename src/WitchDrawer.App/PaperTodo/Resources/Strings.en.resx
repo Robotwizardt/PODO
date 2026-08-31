@@ -178,6 +178,9 @@ Error: {0}</value>
   <data name="MenuHeading" xml:space="preserve">
     <value>Heading</value>
   </data>
+  <data name="MenuArchive" xml:space="preserve">
+    <value>Archive</value>
+  </data>
   <data name="MenuHide" xml:space="preserve">
     <value>Hide</value>
   </data>

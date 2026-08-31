@@ -481,6 +481,36 @@ public sealed class DrawerService
     {
         var box = await _repository.GetBoxAsync(boxId, cancellationToken)
             ?? throw new InvalidOperationException("Box does not exist.");
+        if (box.Type == BoxType.Mapping)
+        {
+            var normalizedOldMappingPath = Path.GetFullPath(oldPath);
+            var normalizedNewMappingPath = Path.GetFullPath(newPath);
+            if (!File.Exists(normalizedNewMappingPath) && !Directory.Exists(normalizedNewMappingPath))
+            {
+                return false;
+            }
+
+            var mappingItem = (await _repository.GetItemsAsync(boxId, cancellationToken))
+                .FirstOrDefault(candidate => PathsEqual(candidate.SourcePath, normalizedOldMappingPath));
+            if (mappingItem is null)
+            {
+                return false;
+            }
+
+            var mappingDisplayName = Path.GetFileName(
+                normalizedNewMappingPath.TrimEnd(
+                    Path.DirectorySeparatorChar,
+                    Path.AltDirectorySeparatorChar));
+            await _repository.UpdateItemFileSystemIdentityAsync(
+                mappingItem.Id,
+                mappingDisplayName,
+                normalizedNewMappingPath,
+                storedPath: null,
+                DateTimeOffset.UtcNow,
+                cancellationToken);
+            return true;
+        }
+
         if (box.Type is not (BoxType.Normal or BoxType.Pixel or BoxType.Drawer or BoxType.Bound))
         {
             return false;
@@ -592,6 +622,85 @@ public sealed class DrawerService
         }
 
         return copiedItems;
+    }
+
+    public async Task<IReadOnlyList<string>> MovePathsIntoFolderAsync(
+        Guid boxId,
+        Guid folderItemId,
+        IEnumerable<string> sourcePaths,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(sourcePaths);
+
+        var box = await _repository.GetBoxAsync(boxId, cancellationToken)
+            ?? throw new InvalidOperationException("Box does not exist.");
+        if (box.Type is not (BoxType.Normal or BoxType.Bound))
+        {
+            throw new InvalidOperationException("只有普通收纳盒和目标收纳盒支持把文件移入盒内文件夹。");
+        }
+
+        var folderItem = await _repository.GetItemAsync(folderItemId, cancellationToken)
+            ?? throw new InvalidOperationException("Target folder does not exist.");
+        if (folderItem.BoxId != boxId || folderItem.ItemKind != ItemKind.Directory)
+        {
+            throw new InvalidOperationException("目标必须是当前收纳盒内的文件夹。");
+        }
+
+        using var boundSyncGate = await AcquireBoundSyncGateAsync(
+            box.Type == BoxType.Bound,
+            cancellationToken);
+        var storageRoot = GetStorageRoot(box, createIfMissing: false);
+        var targetFolder = PathSafety.GetFullExistingPath(
+            folderItem.StoredPath
+                ?? throw new InvalidOperationException("目标文件夹没有可用的存储路径。"));
+        if (!Directory.Exists(targetFolder))
+        {
+            throw new InvalidOperationException("目标必须是当前收纳盒内的文件夹。");
+        }
+
+        PathSafety.EnsureChildPath(storageRoot, targetFolder);
+
+        var normalizedSources = sourcePaths
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Select(PathSafety.GetFullExistingPath)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var currentItems = await _repository.GetItemsAsync(boxId, cancellationToken);
+        var movedPaths = new List<string>(normalizedSources.Length);
+        foreach (var sourcePath in normalizedSources)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var isDirectory = Directory.Exists(sourcePath);
+            if (isDirectory && IsSameOrDescendantPath(targetFolder, sourcePath))
+            {
+                throw new InvalidOperationException("不能把文件夹移动到它自身内部。");
+            }
+
+            if (IsSamePath(Path.GetDirectoryName(sourcePath), targetFolder))
+            {
+                movedPaths.Add(sourcePath);
+                continue;
+            }
+
+            var displayName = Path.GetFileName(
+                sourcePath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+            var targetPath = FileNameService.GetUniqueDestinationPath(
+                targetFolder,
+                displayName,
+                isDirectory);
+            PathSafety.EnsureChildPath(storageRoot, targetPath);
+            await SafeFileOps.MoveAsync(sourcePath, targetPath, isDirectory, cancellationToken);
+
+            var trackedItem = currentItems.FirstOrDefault(item => PathsEqual(item.StoredPath, sourcePath));
+            if (trackedItem is not null)
+            {
+                await _repository.RemoveItemAsync(trackedItem.Id, CancellationToken.None);
+            }
+
+            movedPaths.Add(targetPath);
+        }
+
+        return movedPaths;
     }
 
     public async Task MoveItemToBoxAsync(
@@ -1477,6 +1586,10 @@ public sealed class DrawerService
             .Where(box => box.Type == BoxType.Bound)
             .Select(box => box.Id)
             .ToHashSet();
+        var mappingBoxIds = allBoxes
+            .Where(box => box.Type == BoxType.Mapping)
+            .Select(box => box.Id)
+            .ToHashSet();
         var unavailableManagedBoxIds = allBoxes
             .Where(box => box.Type is BoxType.Normal or BoxType.Pixel or BoxType.Drawer)
             .Where(box => string.IsNullOrWhiteSpace(box.StoragePath)
@@ -1497,7 +1610,9 @@ public sealed class DrawerService
             return items
                 .Where(item => !boundBoxIds.Contains(item.BoxId))
                 .Where(item => !unavailableManagedBoxIds.Contains(item.BoxId))
-                .Where(IsMissingStoredItem)
+                .Where(item => mappingBoxIds.Contains(item.BoxId)
+                    ? IsMissingMappingReference(item)
+                    : IsMissingStoredItem(item))
                 .Select(item => item.Id)
                 .ToArray();
         }, cancellationToken);
@@ -1513,6 +1628,20 @@ public sealed class DrawerService
         return !string.IsNullOrWhiteSpace(item.StoredPath)
             && !File.Exists(item.StoredPath)
             && !Directory.Exists(item.StoredPath);
+    }
+
+    private static bool IsMissingMappingReference(DrawerItem item)
+    {
+        if (string.IsNullOrWhiteSpace(item.SourcePath)
+            || File.Exists(item.SourcePath)
+            || Directory.Exists(item.SourcePath))
+        {
+            return false;
+        }
+
+        var parentDirectory = Path.GetDirectoryName(Path.GetFullPath(item.SourcePath));
+        return !string.IsNullOrWhiteSpace(parentDirectory)
+            && Directory.Exists(parentDirectory);
     }
 
     private async Task RepairStoredPathsAsync(CancellationToken cancellationToken)

@@ -50,6 +50,18 @@ public sealed class DesktopPaperManagerViewModel : ObservableObject
         return true;
     }
 
+    public bool ArchivePaper(DesktopPaperSummary? paper)
+    {
+        if (paper is null || !_paperService.ArchivePaper(paper.Id))
+        {
+            return false;
+        }
+
+        ReplacePapers();
+        StatusText = "已归档到归档区";
+        return true;
+    }
+
     public bool DeletePaper(DesktopPaperSummary? paper)
     {
         if (paper is null || !_paperService.DeletePaper(paper.Id))

@@ -1,6 +1,8 @@
+using System.Windows.Controls;
 using System.Windows.Media;
 using WitchDrawer.App.ViewModels;
 using WitchDrawer.App.Views;
+using WitchDrawer.Core.Models;
 
 namespace WitchDrawer.App.Tests;
 
@@ -111,6 +113,61 @@ public sealed class DesktopBoxWindowDragTests
 
         Assert.Equal(1, rect.Width);
         Assert.Equal(1, rect.Height);
+    }
+
+    [Fact]
+    public void FolderDropTarget_ResolvesFolderFromItsVisualContent()
+    {
+        var resolved = RunInSta(() =>
+        {
+            var now = DateTimeOffset.UtcNow;
+            var folder = new DrawerItemViewModel(
+                new DrawerItem(
+                    Guid.NewGuid(),
+                    Guid.NewGuid(),
+                    "客户资料",
+                    ItemKind.Directory,
+                    SourcePath: null,
+                    StoredPath: @"C:\Box\客户资料",
+                    SortOrder: 0,
+                    CreatedAt: now,
+                    UpdatedAt: now));
+            var content = new Border();
+            var container = new ListBoxItem
+            {
+                DataContext = folder,
+                Content = content
+            };
+
+            _ = container.Content;
+            return DesktopBoxWindow.GetFolderDropTarget(content);
+        });
+
+        Assert.NotNull(resolved);
+        Assert.Equal("客户资料", resolved.DisplayName);
+    }
+
+    private static T RunInSta<T>(Func<T> action)
+    {
+        T? result = default;
+        Exception? exception = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                result = action();
+            }
+            catch (Exception caught)
+            {
+                exception = caught;
+            }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+
+        Assert.Null(exception);
+        return result!;
     }
 }
 

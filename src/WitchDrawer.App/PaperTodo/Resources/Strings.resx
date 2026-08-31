@@ -187,6 +187,9 @@
   <data name="MenuHeading" xml:space="preserve">
     <value>标题</value>
   </data>
+  <data name="MenuArchive" xml:space="preserve">
+    <value>归档</value>
+  </data>
   <data name="MenuHide" xml:space="preserve">
     <value>隐藏</value>
   </data>

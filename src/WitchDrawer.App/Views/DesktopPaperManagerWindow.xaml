@@ -9,21 +9,22 @@
         MinHeight="340"
         WindowStartupLocation="CenterOwner"
         WindowStyle="None"
-        AllowsTransparency="True"
+        AllowsTransparency="False"
         ResizeMode="CanResize"
         Background="Transparent"
         PreviewKeyDown="OnPreviewKeyDown">
     <Border Margin="12"
-            Background="{DynamicResource PanelBrush}"
-            BorderBrush="{DynamicResource BorderBrushSoft}"
+            Background="{DynamicResource AcrylicSurfaceBrush}"
+            BorderBrush="{DynamicResource AcrylicStrokeBrush}"
             BorderThickness="1"
-            CornerRadius="10"
+            CornerRadius="{DynamicResource WindowCornerRadius}"
+            ClipToBounds="True"
             SnapsToDevicePixels="True">
         <Border.Effect>
             <DropShadowEffect BlurRadius="18"
                               Direction="270"
-                              Opacity="0.18"
-                              ShadowDepth="5" />
+                              Opacity="0.14"
+                              ShadowDepth="3" />
         </Border.Effect>
         <Grid>
             <Grid.RowDefinitions>
@@ -31,6 +32,14 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
+
+            <Border Grid.RowSpan="3"
+                    Margin="1"
+                    BorderBrush="{DynamicResource GlassHighlightBrush}"
+                    BorderThickness="1,1,0,0"
+                    CornerRadius="16"
+                    IsHitTestVisible="False"
+                    Opacity="0.66" />
 
             <Border Padding="18,15,10,13"
                     BorderBrush="{DynamicResource BorderBrushSoft}"
@@ -54,9 +63,9 @@
                                        FontWeight="SemiBold"
                                        Foreground="{DynamicResource TextPrimaryBrush}" />
                         </StackPanel>
-                        <TextBlock Text="已点 × 隐藏的便签，可以在这里恢复或永久删除"
+                        <TextBlock Text="已隐藏的便签可在这里恢复；所有便签都可归档或永久删除"
                                    Margin="0,5,0,0"
-                                   FontSize="11.5"
+                                   FontSize="{DynamicResource CaptionFontSize}"
                                    Foreground="{DynamicResource TextMutedBrush}" />
                     </StackPanel>
                     <Button Grid.Column="1"
@@ -65,6 +74,7 @@
                             Padding="0"
                             Style="{StaticResource GhostButtonStyle}"
                             ToolTip="关闭"
+                            AutomationProperties.Name="关闭桌面便签管理"
                             Click="OnCloseClicked">
                         <TextBlock Text="&#xE8BB;"
                                    FontFamily="Segoe Fluent Icons"
@@ -87,11 +97,11 @@
                         VerticalAlignment="Center">
                     <StackPanel Orientation="Horizontal">
                         <TextBlock Text="已隐藏"
-                                   FontSize="11"
+                                    FontSize="{DynamicResource CaptionFontSize}"
                                    Foreground="{DynamicResource AccentBrush}" />
                         <TextBlock Text="{Binding HiddenPaperCount}"
                                    Margin="6,0,0,0"
-                                   FontSize="11"
+                                    FontSize="{DynamicResource CaptionFontSize}"
                                    FontWeight="SemiBold"
                                    Foreground="{DynamicResource AccentBrush}" />
                     </StackPanel>
@@ -99,7 +109,7 @@
                 <TextBlock Grid.Column="1"
                            Text="{Binding StatusText}"
                            Margin="10,0"
-                           FontSize="11"
+                            FontSize="{DynamicResource CaptionFontSize}"
                            Foreground="{DynamicResource TextMutedBrush}"
                            VerticalAlignment="Center"
                            TextTrimming="CharacterEllipsis" />
@@ -109,6 +119,7 @@
                         Padding="0"
                         Style="{StaticResource GhostButtonStyle}"
                         ToolTip="刷新列表"
+                        AutomationProperties.Name="刷新桌面便签列表"
                         Click="OnRefreshClicked">
                     <TextBlock Text="&#xE72C;"
                                FontFamily="Segoe Fluent Icons"
@@ -122,7 +133,7 @@
                         ToolTip="永久删除所有已隐藏的便签"
                         Click="OnDeleteHiddenPapersClicked">
                     <TextBlock Text="清空已隐藏"
-                               FontSize="11" />
+                                FontSize="{DynamicResource CaptionFontSize}" />
                 </Button>
             </Grid>
 
@@ -133,13 +144,13 @@
                          BorderThickness="0"
                          ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                          ScrollViewer.VerticalScrollBarVisibility="Auto"
-                         FocusVisualStyle="{x:Null}">
+                         FocusVisualStyle="{DynamicResource AppFocusVisualStyle}">
                     <ListBox.ItemContainerStyle>
                         <Style TargetType="{x:Type ListBoxItem}">
                             <Setter Property="Padding" Value="0" />
                             <Setter Property="Margin" Value="0,0,0,5" />
                             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-                            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+                            <Setter Property="FocusVisualStyle" Value="{DynamicResource AppFocusVisualStyle}" />
                             <Setter Property="Template">
                                 <Setter.Value>
                                     <ControlTemplate TargetType="{x:Type ListBoxItem}">
@@ -156,6 +167,10 @@
                                                 <Setter TargetName="Root" Property="Background" Value="{DynamicResource HoverBrush}" />
                                                 <Setter TargetName="Root" Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
                                             </Trigger>
+                                            <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                                                <Setter TargetName="Root" Property="BorderBrush" Value="{DynamicResource FocusRingBrush}" />
+                                                <Setter TargetName="Root" Property="BorderThickness" Value="2" />
+                                            </Trigger>
                                         </ControlTemplate.Triggers>
                                     </ControlTemplate>
                                 </Setter.Value>
@@ -168,6 +183,7 @@
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="32" />
                                     <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
                                     <ColumnDefinition Width="Auto" />
                                     <ColumnDefinition Width="Auto" />
                                     <ColumnDefinition Width="Auto" />
@@ -193,7 +209,7 @@
                                                Foreground="{DynamicResource TextPrimaryBrush}"
                                                TextTrimming="CharacterEllipsis" />
                                     <TextBlock Margin="0,3,0,0"
-                                               FontSize="10.5"
+                                                FontSize="{DynamicResource CaptionFontSize}"
                                                Foreground="{DynamicResource TextMutedBrush}"
                                                TextTrimming="CharacterEllipsis">
                                         <Run Text="{Binding KindLabel}" />
@@ -208,7 +224,7 @@
                                         VerticalAlignment="Center"
                                         Margin="0,0,7,0">
                                     <TextBlock Text="{Binding VisibilityLabel}"
-                                               FontSize="10"
+                                                FontSize="{DynamicResource CaptionFontSize}"
                                                Foreground="{DynamicResource AccentBrush}" />
                                 </Border>
                                 <Button Grid.Column="3"
@@ -221,15 +237,27 @@
                                         Tag="{Binding}"
                                         Click="OnShowPaperClicked">
                                     <TextBlock Text="显示"
-                                               FontSize="10.5" />
+                                                FontSize="{DynamicResource CaptionFontSize}" />
                                 </Button>
                                 <Button Grid.Column="4"
+                                        Height="27"
+                                        Padding="9,3"
+                                        Margin="0,0,4,0"
+                                        Style="{StaticResource GhostButtonStyle}"
+                                        ToolTip="归档到归档区"
+                                        Tag="{Binding}"
+                                        Click="OnArchivePaperClicked">
+                                    <TextBlock Text="归档"
+                                                FontSize="{DynamicResource CaptionFontSize}" />
+                                </Button>
+                                <Button Grid.Column="5"
                                         Width="28"
                                         Height="27"
                                         Padding="0"
                                         Style="{StaticResource GhostButtonStyle}"
                                         Foreground="{DynamicResource DangerBrush}"
                                         ToolTip="永久删除"
+                                        AutomationProperties.Name="永久删除便签"
                                         Tag="{Binding}"
                                         Click="OnDeletePaperClicked">
                                     <TextBlock Text="&#xE74D;"

@@ -9,6 +9,8 @@ public sealed class DesktopToolWindow
 {
     public const int SystemCommandMessage = 0x0112;
 
+    private const uint WindowSizeMessage = 0x0005;
+    private const nint SizeRestored = 0;
     private const int WindowOwnerIndex = -8;
     private const int ExtendedStyleIndex = -20;
     private const nint ExtendedStyleAppWindow = 0x00040000;
@@ -189,6 +191,37 @@ public sealed class DesktopToolWindow
         ShowWindow(_handle, ShowWithoutActivation);
     }
 
+    /// <summary>
+    /// Replays the current client size notification for a window whose HWND was
+    /// hidden and shown without changing its native bounds. WPF uses WM_SIZE to
+    /// arrange its root visual; an unchanged native size otherwise does not emit
+    /// the notification needed to restore a manual-size layout.
+    /// </summary>
+    public bool SynchronizeClientSize()
+    {
+        if (!IsAlive || !GetClientRect(_handle, out var clientBounds))
+        {
+            return false;
+        }
+
+        var width = clientBounds.Right - clientBounds.Left;
+        var height = clientBounds.Bottom - clientBounds.Top;
+        if (width <= 0
+            || height <= 0
+            || width > ushort.MaxValue
+            || height > ushort.MaxValue)
+        {
+            return false;
+        }
+
+        _ = SendMessage(
+            _handle,
+            WindowSizeMessage,
+            SizeRestored,
+            PackSize(width, height));
+        return true;
+    }
+
     public static bool IsMinimizeSystemCommand(int message, nint command)
     {
         return message == SystemCommandMessage
@@ -208,6 +241,9 @@ public sealed class DesktopToolWindow
             ? SetWindowLongPtr64(windowHandle, index, value)
             : SetWindowLong32(windowHandle, index, value);
     }
+
+    private static nint PackSize(int width, int height) =>
+        unchecked((nint)(uint)(width | (height << 16)));
 
     [DllImport("user32.dll", EntryPoint = "GetWindowLong")]
     private static extern nint GetWindowLong32(nint windowHandle, int index);
@@ -231,6 +267,17 @@ public sealed class DesktopToolWindow
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool IsWindow(nint windowHandle);
 
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetClientRect(nint windowHandle, out NativeRect bounds);
+
+    [DllImport("user32.dll", EntryPoint = "SendMessageW")]
+    private static extern nint SendMessage(
+        nint windowHandle,
+        uint message,
+        nint wordParameter,
+        nint longParameter);
+
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern uint RegisterWindowMessageW(string messageName);
 
@@ -248,5 +295,14 @@ public sealed class DesktopToolWindow
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool ShowWindow(nint windowHandle, int command);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeRect
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
 
 }

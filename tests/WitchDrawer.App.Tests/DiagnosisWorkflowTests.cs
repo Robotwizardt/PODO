@@ -352,6 +352,166 @@ public sealed class DiagnosisWorkflowTests
         }
     }
 
+    [Fact]
+    public async Task DesktopBoxViewModel_MovePathsIntoFolder_RemovesMovedFileFromBoxSurface()
+    {
+        var root = Path.Combine(
+            Path.GetTempPath(),
+            "Podo.Diagnosis",
+            Guid.NewGuid().ToString("N"));
+
+        try
+        {
+            var paths = new AppPaths(root);
+            var repository = new DrawerRepository(paths.DatabasePath);
+            var drawerService = new DrawerService(paths, repository);
+            await drawerService.InitializeAsync();
+            var box = await drawerService.CreateBoxAsync("文件收纳盒", BoxType.Normal);
+            var folder = await drawerService.CreateFileSystemItemAsync(
+                box.Id,
+                ItemKind.Directory,
+                "客户资料");
+            var sourceDirectory = Path.Combine(root, "source");
+            Directory.CreateDirectory(sourceDirectory);
+            var sourceFile = Path.Combine(sourceDirectory, "合同.txt");
+            await File.WriteAllTextAsync(sourceFile, "content");
+            var viewModel = new DesktopBoxViewModel(
+                box,
+                drawerService,
+                new TodoService(repository),
+                new NoOpFileLauncher(),
+                new NoOpLogger(),
+                BoxVisualStyle.Modern);
+            await viewModel.LoadAsync();
+            var folderViewModel = Assert.Single(viewModel.Items, item => item.Id == folder.Id);
+
+            var moved = await viewModel.MovePathsIntoFolderAsync(folderViewModel, [sourceFile]);
+
+            Assert.True(moved);
+            Assert.Single(viewModel.Items);
+            Assert.Equal(folder.Id, viewModel.Items[0].Id);
+            Assert.True(File.Exists(Path.Combine(folder.StoredPath!, "合同.txt")));
+        }
+        finally
+        {
+            try
+            {
+                if (Directory.Exists(root))
+                {
+                    Directory.Delete(root, recursive: true);
+                }
+            }
+            catch
+            {
+            }
+        }
+    }
+
+    [Fact]
+    public async Task DesktopBoxViewModel_MoveDrawerItemIntoFolder_MovesTrackedBoxFile()
+    {
+        var root = Path.Combine(
+            Path.GetTempPath(),
+            "Podo.Diagnosis",
+            Guid.NewGuid().ToString("N"));
+
+        try
+        {
+            var paths = new AppPaths(root);
+            var repository = new DrawerRepository(paths.DatabasePath);
+            var drawerService = new DrawerService(paths, repository);
+            await drawerService.InitializeAsync();
+            var box = await drawerService.CreateBoxAsync("文件收纳盒", BoxType.Normal);
+            var folder = await drawerService.CreateFileSystemItemAsync(
+                box.Id,
+                ItemKind.Directory,
+                "项目文件");
+            var sourceDirectory = Path.Combine(root, "source");
+            Directory.CreateDirectory(sourceDirectory);
+            var sourceFile = Path.Combine(sourceDirectory, "计划.txt");
+            await File.WriteAllTextAsync(sourceFile, "plan");
+            var imported = await drawerService.ImportPathAsync(box.Id, sourceFile);
+            var viewModel = new DesktopBoxViewModel(
+                box,
+                drawerService,
+                new TodoService(repository),
+                new NoOpFileLauncher(),
+                new NoOpLogger(),
+                BoxVisualStyle.Modern);
+            await viewModel.LoadAsync();
+            var folderViewModel = Assert.Single(viewModel.Items, item => item.Id == folder.Id);
+
+            var moved = await viewModel.MoveDrawerItemIntoFolderAsync(imported.Id, folderViewModel);
+
+            Assert.True(moved);
+            Assert.Single(viewModel.Items);
+            Assert.Equal(folder.Id, viewModel.Items[0].Id);
+            Assert.True(File.Exists(Path.Combine(folder.StoredPath!, "计划.txt")));
+            Assert.Null(await repository.GetItemAsync(imported.Id));
+        }
+        finally
+        {
+            try
+            {
+                if (Directory.Exists(root))
+                {
+                    Directory.Delete(root, recursive: true);
+                }
+            }
+            catch
+            {
+            }
+        }
+    }
+
+    [Fact]
+    public async Task BoundBox_EnsureLoadedAfterExternalChangeRefreshesVisibleItems()
+    {
+        var root = Path.Combine(
+            Path.GetTempPath(),
+            "Podo.Diagnosis",
+            Guid.NewGuid().ToString("N"));
+
+        try
+        {
+            var paths = new AppPaths(root);
+            var repository = new DrawerRepository(paths.DatabasePath);
+            var drawerService = new DrawerService(paths, repository);
+            await drawerService.InitializeAsync();
+            var boundFolder = Path.Combine(root, "bound");
+            Directory.CreateDirectory(boundFolder);
+            await File.WriteAllTextAsync(Path.Combine(boundFolder, "原文件.txt"), "old");
+            var box = await drawerService.CreateBoundBoxAsync("目标收纳盒", boundFolder);
+            var viewModel = new DesktopBoxViewModel(
+                box,
+                drawerService,
+                new TodoService(repository),
+                new NoOpFileLauncher(),
+                new NoOpLogger(),
+                BoxVisualStyle.Modern);
+            await viewModel.LoadAsync();
+            Assert.Single(viewModel.Items);
+
+            await File.WriteAllTextAsync(Path.Combine(boundFolder, "外部新增.txt"), "new");
+            await viewModel.EnsureLoadedAsync();
+
+            Assert.Contains(viewModel.Items, item => item.DisplayName == "外部新增.txt");
+        }
+        finally
+        {
+            try
+            {
+                if (Directory.Exists(root))
+                {
+                    Directory.Delete(root, recursive: true);
+                }
+            }
+            catch
+            {
+            }
+        }
+    }
+
     private static async Task<(
         int ExistingColumn,
         int ExistingRow,

@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using WitchDrawer.App.Infrastructure;
 
 namespace WitchDrawer.App.FileDialogAccess;
 
@@ -10,7 +11,22 @@ internal partial class FileDialogAccessWindow : Window
     {
         InitializeComponent();
         DataContext = viewModel;
+        Loaded += OnLoaded;
+        AppThemeManager.ThemeChanged += OnThemeChanged;
     }
+
+    protected override void OnClosed(EventArgs e)
+    {
+        Loaded -= OnLoaded;
+        AppThemeManager.ThemeChanged -= OnThemeChanged;
+        base.OnClosed(e);
+    }
+
+    private void OnLoaded(object sender, RoutedEventArgs e) =>
+        AppThemeManager.ApplyToWindow(this, WindowBackdropKind.Transient);
+
+    private void OnThemeChanged(object? sender, AppTheme theme) =>
+        AppThemeManager.ApplyToWindow(this, WindowBackdropKind.Transient);
 
     private void OnMoreButtonClick(object sender, RoutedEventArgs e)
     {

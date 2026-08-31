@@ -57,7 +57,7 @@ public sealed partial class BoxViewModel : ObservableObject
 
     internal static string GetLayoutPresetSettingKey(Guid boxId) => $"BoxPreset_{boxId}";
 
-    internal static string GetSizeModeSettingKey(Guid boxId) => $"BoxSizeMode:{boxId:N}";
+    internal static string GetWindowSizeSettingKey(Guid boxId) => $"BoxWindowSize:{boxId:N}";
 
     internal static string GetTitleVisibilitySettingKey(Guid boxId) =>
         $"BoxTitleVisible:{boxId:N}";
@@ -97,11 +97,6 @@ public sealed partial class BoxViewModel : ObservableObject
     public bool IsDrawerBox => Type == BoxType.Drawer;
 
     public bool IsBoundBox => Type == BoxType.Bound;
-
-    /// <summary>
-    /// 固定尺寸适用于网格收纳盒和项目收纳盒；项目盒用它控制宽度与模块区高度。
-    /// </summary>
-    public bool SupportsFixedSize => Type is BoxType.Normal or BoxType.Pixel or BoxType.Bound or BoxType.Project;
 
     /// <summary>
     /// 排序（自由/名称/大小/类型/修改日期）适用于所有收纳类盒型；待办盒有自己的排序语义。

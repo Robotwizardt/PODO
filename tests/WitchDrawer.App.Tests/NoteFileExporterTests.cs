@@ -100,6 +100,76 @@ public sealed class NoteFileExporterTests
     }
 
     [Fact]
+    public void DesktopPaperContextMenu_ArchivesThePaperAndHidesItFromDesktop()
+    {
+        Exception? failure = null;
+        var thread = new Thread(() =>
+        {
+            var directory = Path.Combine(
+                Path.GetTempPath(),
+                "PODO Paper Archive Menu Tests",
+                Guid.NewGuid().ToString("N"));
+
+            try
+            {
+                using var controller = new AppController(
+                    directory,
+                    enableStandaloneTray: false,
+                    ownsApplicationLifetime: false);
+                var paper = new PaperData
+                {
+                    Type = PaperTypes.Note,
+                    Title = "稍后查看",
+                    Content = "归档内容",
+                    IsVisible = true
+                };
+                controller.State.Papers.Add(paper);
+                var window = new PaperWindow(paper, controller);
+
+                try
+                {
+                    var menu = FindContextMenu(
+                        Assert.IsAssignableFrom<DependencyObject>(window.Content));
+                    var archiveItem = menu.Items
+                        .OfType<MenuItem>()
+                        .Single(item => string.Equals(
+                            item.Header?.ToString(),
+                            "归档",
+                            StringComparison.Ordinal));
+
+                    archiveItem.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+
+                    Assert.True(paper.IsArchived);
+                    Assert.False(paper.IsVisible);
+                }
+                finally
+                {
+                    window.Close();
+                }
+            }
+            catch (Exception exception)
+            {
+                failure = exception;
+            }
+            finally
+            {
+                if (Directory.Exists(directory))
+                {
+                    Directory.Delete(directory, recursive: true);
+                }
+            }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+
+        if (failure is not null)
+        {
+            ExceptionDispatchInfo.Capture(failure).Throw();
+        }
+    }
+
+    [Fact]
     public void DesktopNoteContextMenu_SaveFileWritesTxtChosenByUser()
     {
         Exception? failure = null;

@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.IO;
 using System.Threading;
 using System.Windows;
 using CommunityToolkit.Mvvm.Messaging;
@@ -36,7 +37,11 @@ public sealed class DesktopBoxManager
     private readonly BoxPositionLockStateStore _boxPositionLockStateStore;
     private readonly PaperTodoHost? _paperTodoHost;
     private readonly Dictionary<Guid, DesktopBoxWindow> _windows = [];
+    private readonly Dictionary<Guid, Point> _lastWindowOrigins = [];
+    private readonly Dictionary<Guid, LiveProjectAttachmentState> _liveProjectAttachments = [];
     private readonly Dictionary<Guid, BoundFolderWatcher> _boundFolderWatchers = [];
+    private readonly Dictionary<Guid, Dictionary<string, BoundFolderWatcher>> _mappingFolderWatchers = [];
+    private readonly SemaphoreSlim _mappingWatcherSyncGate = new(1, 1);
     private readonly HashSet<Guid> _groupHiddenProjectIds = [];
     private readonly HashSet<Guid> _openedGroupedProjectIds = [];
     private readonly HashSet<Guid> _temporarilyHiddenProjectFolderIds = [];
@@ -51,6 +56,15 @@ public sealed class DesktopBoxManager
     private bool _isAdjustingPosition;
     private bool _isApplyingProjectLayout;
     private int _projectLayoutRefreshQueued;
+    private int _dragFeedbackRefreshQueued;
+    private DesktopBoxWindow? _pendingDragFeedbackWindow;
+
+    private sealed class LiveProjectAttachmentState
+    {
+        public HashSet<Guid> LinkedBoxIds { get; } = [];
+
+        public HashSet<string> LinkedPaperIds { get; } = new(StringComparer.Ordinal);
+    }
 
     public DesktopBoxManager(
         DrawerService drawerService,
@@ -110,9 +124,6 @@ public sealed class DesktopBoxManager
         WeakReferenceMessenger.Default.Register<DesktopBoxManager, DrawerSortModeChangedMessage>(
             this,
             static (recipient, message) => recipient.ApplyDrawerSortMode(message));
-        WeakReferenceMessenger.Default.Register<DesktopBoxManager, BoxSizeModeChangedMessage>(
-            this,
-            static (recipient, message) => recipient.ApplyBoxSizeMode(message));
     }
 
     public event EventHandler<BoxItemsChangedEventArgs>? ItemsChanged;
@@ -149,6 +160,7 @@ public sealed class DesktopBoxManager
             }
 
             SyncBoundFolderWatchers(boxes);
+            await SyncMappingFolderWatchersAsync(boxes);
 
             var boxIds = boxes.Select(box => box.Id).ToHashSet();
 
@@ -167,6 +179,8 @@ public sealed class DesktopBoxManager
                 win.ViewModel.ProjectFolderMemberOpenRequested -= OnProjectFolderMemberOpenRequested;
                 win.ForceClose();
                 _windows.Remove(removedId);
+                _lastWindowOrigins.Remove(removedId);
+                _liveProjectAttachments.Remove(removedId);
             }
 
             for (var index = 0; index < boxes.Length; index++)
@@ -203,16 +217,26 @@ public sealed class DesktopBoxManager
                     await viewModel.LoadTitleVisibilityAsync();
                     await viewModel.LoadFileNameVisibilityAsync();
                     await viewModel.LoadSortModeAsync();
-                    await viewModel.LoadSizeModeAsync();
                     await viewModel.LoadNoteCollapsedAsync();
-                    viewModel.ItemsChanged += (_, _) => ItemsChanged?.Invoke(
-                        this,
-                        new BoxItemsChangedEventArgs(viewModel.BoxId));
+                    viewModel.ItemsChanged += (_, _) =>
+                    {
+                        ItemsChanged?.Invoke(
+                            this,
+                            new BoxItemsChangedEventArgs(viewModel.BoxId));
+                        if (viewModel.IsMappingBox)
+                        {
+                            _ = SyncMappingFolderWatchersAsync();
+                        }
+                    };
                     viewModel.ProjectLinksChanged += OnDesktopProjectLinksChanged;
                     viewModel.ProjectFolderChanged += OnDesktopProjectFolderChanged;
                     viewModel.ProjectFolderMemberOpenRequested += OnProjectFolderMemberOpenRequested;
 
                     window = new DesktopBoxWindow(viewModel);
+                    var savedWindowSize = BoxWindowSizeState.Parse(
+                        await _drawerService.GetSettingAsync(
+                            BoxViewModel.GetWindowSizeSettingKey(box.Id)));
+                    window.ApplySavedWindowSize(savedWindowSize);
                     window.SetProjectBoxActionsCallbacks(
                         RenameDesktopBoxAsync,
                         ToggleDesktopBoxPositionLockAsync,
@@ -229,6 +253,8 @@ public sealed class DesktopBoxManager
                     }
 
                     _windows.Add(box.Id, window);
+                    _lastWindowOrigins[box.Id] = new Point(window.Left, window.Top);
+                    window.SetWindowSizeChangedCallback(SaveWindowSizeAsync);
 
                     window.LocationChanged += OnWindowLocationChanged;
                     window.PreviewMouseLeftButtonUp += OnWindowMouseUp;
@@ -298,6 +324,8 @@ public sealed class DesktopBoxManager
                     {
                         await window.ViewModel.LoadAsync();
                     }
+
+                    window.ResyncSizeToContent();
                 }
 
 
@@ -377,7 +405,10 @@ public sealed class DesktopBoxManager
                     && affectedWindow.IsVisible)
                 {
                     await affectedWindow.ViewModel.LoadAsync();
+                    affectedWindow.ResyncSizeToContent();
                 }
+
+                await SyncMappingFolderWatchersAsync();
 
                 return;
             }
@@ -385,6 +416,7 @@ public sealed class DesktopBoxManager
             foreach (var window in _windows.Values.Where(window => window.IsVisible).ToArray())
             {
                 await window.ViewModel.LoadAsync();
+                window.ResyncSizeToContent();
             }
 
             await ApplyProjectLinkedLayoutsAsync();
@@ -402,6 +434,20 @@ public sealed class DesktopBoxManager
             var key = BoxPositionSettingPrefix + boxId.ToString("N");
             var value = SerializePosition(window.Left, window.Top);
             await _drawerService.SetSettingAsync(key, value);
+        }
+
+        await SaveAllWindowSizesAsync();
+    }
+
+    public async Task SaveAllWindowSizesAsync()
+    {
+        foreach (var (boxId, window) in _windows)
+        {
+            var size = window.GetManualWindowSizeState();
+            if (size is not null)
+            {
+                await SaveWindowSizeAsync(boxId, size);
+            }
         }
     }
 
@@ -445,6 +491,8 @@ public sealed class DesktopBoxManager
             // 让 OnClosed 里的退订/清理执行，否则整棵窗口对象图被静态事件永久引用（僵尸泄漏）。
             window.ForceClose();
             _windows.Remove(boxId);
+            _lastWindowOrigins.Remove(boxId);
+            _liveProjectAttachments.Remove(boxId);
             recreateRequired = true;
         }
 
@@ -539,8 +587,22 @@ public sealed class DesktopBoxManager
         }
 
         var key = BoxPositionSettingPrefix + boxId.ToString("N");
-        var value = $"{window.Left}{PositionSeparator}{window.Top}";
+        var value = SerializePosition(window.Left, window.Top);
         await _drawerService.SetSettingAsync(key, value);
+    }
+
+    private async Task SaveWindowSizeAsync(Guid boxId, BoxWindowSizeState size)
+    {
+        try
+        {
+            await _drawerService.SetSettingAsync(
+                BoxViewModel.GetWindowSizeSettingKey(boxId),
+                BoxWindowSizeState.Normalize(size.Width, size.Height).Serialize());
+        }
+        catch (Exception exception)
+        {
+            _logger.Error(exception, $"Failed to save window size for desktop box {boxId:N}.");
+        }
     }
 
     private async Task RenameDesktopBoxAsync(Guid boxId, string newName)
@@ -615,12 +677,31 @@ public sealed class DesktopBoxManager
         }
 
         _windows.Clear();
+        _lastWindowOrigins.Clear();
+        _liveProjectAttachments.Clear();
         foreach (var watcher in _boundFolderWatchers.Values)
         {
             watcher.Dispose();
         }
 
         _boundFolderWatchers.Clear();
+        await _mappingWatcherSyncGate.WaitAsync();
+        try
+        {
+            foreach (var watchers in _mappingFolderWatchers.Values)
+            {
+                foreach (var watcher in watchers.Values)
+                {
+                    watcher.Dispose();
+                }
+            }
+
+            _mappingFolderWatchers.Clear();
+        }
+        finally
+        {
+            _mappingWatcherSyncGate.Release();
+        }
         var foregroundChangeCts = Interlocked.Exchange(ref _foregroundChangeCts, null);
         foregroundChangeCts?.Cancel();
         foregroundChangeCts?.Dispose();
@@ -682,6 +763,118 @@ public sealed class DesktopBoxManager
                     $"Failed to watch storage folder for box {box.Id:N}: {box.StoragePath}");
             }
         }
+    }
+
+    private async Task SyncMappingFolderWatchersAsync(
+        IReadOnlyList<WitchDrawer.Core.Models.Box>? boxes = null)
+    {
+        if (_closing)
+        {
+            return;
+        }
+
+        await _mappingWatcherSyncGate.WaitAsync();
+        try
+        {
+            if (_closing)
+            {
+                return;
+            }
+
+            boxes ??= await _drawerService.GetBoxesAsync();
+            var mappingBoxes = boxes
+                .Where(box => box.Type == WitchDrawer.Core.Models.BoxType.Mapping)
+                .ToDictionary(box => box.Id);
+
+            foreach (var removedBoxId in _mappingFolderWatchers.Keys
+                         .Where(boxId => !mappingBoxes.ContainsKey(boxId))
+                         .ToArray())
+            {
+                foreach (var watcher in _mappingFolderWatchers[removedBoxId].Values)
+                {
+                    watcher.Dispose();
+                }
+
+                _mappingFolderWatchers.Remove(removedBoxId);
+            }
+
+            foreach (var box in mappingBoxes.Values)
+            {
+                var items = await _drawerService.GetItemsAsync(box.Id);
+                var expectedDirectories = GetMappingWatchDirectories(items)
+                    .Where(Directory.Exists)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                if (!_mappingFolderWatchers.TryGetValue(box.Id, out var watchers))
+                {
+                    watchers = new Dictionary<string, BoundFolderWatcher>(
+                        StringComparer.OrdinalIgnoreCase);
+                    _mappingFolderWatchers.Add(box.Id, watchers);
+                }
+
+                foreach (var removedDirectory in watchers.Keys
+                             .Where(directory => !expectedDirectories.Contains(directory))
+                             .ToArray())
+                {
+                    watchers[removedDirectory].Dispose();
+                    watchers.Remove(removedDirectory);
+                }
+
+                foreach (var directory in expectedDirectories.Where(directory => !watchers.ContainsKey(directory)))
+                {
+                    try
+                    {
+                        var watcher = new BoundFolderWatcher(directory);
+                        watcher.Changed += (_, _) => QueueBoundFolderRefresh(box.Id);
+                        watcher.Renamed += (_, eventArgs) =>
+                            QueueStorageFolderRename(box.Id, eventArgs);
+                        watchers.Add(directory, watcher);
+                    }
+                    catch (Exception exception)
+                    {
+                        _logger.Error(
+                            exception,
+                            $"Failed to watch mapping references for box {box.Id:N}: {directory}");
+                    }
+                }
+            }
+        }
+        catch (Exception exception)
+        {
+            _logger.Error(exception, "Failed to synchronize mapping reference watchers.");
+        }
+        finally
+        {
+            _mappingWatcherSyncGate.Release();
+        }
+    }
+
+    internal static IReadOnlyList<string> GetMappingWatchDirectories(
+        IEnumerable<WitchDrawer.Core.Models.DrawerItem> items)
+    {
+        var directories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var item in items)
+        {
+            if (string.IsNullOrWhiteSpace(item.SourcePath))
+            {
+                continue;
+            }
+
+            try
+            {
+                var directory = Path.GetDirectoryName(Path.GetFullPath(item.SourcePath));
+                if (!string.IsNullOrWhiteSpace(directory))
+                {
+                    directories.Add(directory);
+                }
+            }
+            catch (Exception exception) when (exception is ArgumentException
+                                               or NotSupportedException
+                                               or PathTooLongException)
+            {
+            }
+        }
+
+        return directories.ToArray();
     }
 
     private void QueueBoundFolderRefresh(Guid boxId)
@@ -1117,6 +1310,25 @@ public sealed class DesktopBoxManager
         try
         {
             var effectiveScope = refreshScope ?? ProjectAttachmentLayoutScope.All;
+            if (effectiveScope.ProjectBoxId is Guid scopedProjectBoxId)
+            {
+                _liveProjectAttachments.Remove(scopedProjectBoxId);
+            }
+
+            var liveProjectIds = boxes
+                .Where(effectiveScope.Includes)
+                .Select(projectBox => projectBox.Id)
+                .ToHashSet();
+            if (effectiveScope.ProjectBoxId is null)
+            {
+                foreach (var staleProjectId in _liveProjectAttachments.Keys
+                             .Where(projectId => !liveProjectIds.Contains(projectId))
+                             .ToArray())
+                {
+                    _liveProjectAttachments.Remove(staleProjectId);
+                }
+            }
+
             foreach (var projectBox in boxes.Where(effectiveScope.Includes))
             {
                 if (!_windows.TryGetValue(projectBox.Id, out var projectWindow))
@@ -1124,6 +1336,8 @@ public sealed class DesktopBoxManager
                     continue;
                 }
 
+                var liveAttachments = new LiveProjectAttachmentState();
+                _liveProjectAttachments[projectBox.Id] = liveAttachments;
                 var attachmentIndices = new Dictionary<ProjectAttachmentSide, int>();
                 var occupiedAttachmentBounds = new Dictionary<ProjectAttachmentSide, List<Rect>>();
                 var links = await _projectService.GetLinkedBoxesAsync(projectBox.Id);
@@ -1160,6 +1374,8 @@ public sealed class DesktopBoxManager
                         linkedWindow.QueueSendToBottom();
                         continue;
                     }
+
+                    liveAttachments.LinkedBoxIds.Add(link.LinkedBoxId);
 
                     var occupiedBounds = GetProjectAttachmentOccupiedBounds(
                         occupiedAttachmentBounds,
@@ -1210,6 +1426,8 @@ public sealed class DesktopBoxManager
                         continue;
                     }
 
+                    liveAttachments.LinkedPaperIds.Add(link.PaperId);
+
                     var occupiedBounds = GetProjectAttachmentOccupiedBounds(
                         occupiedAttachmentBounds,
                         link.AttachmentSide);
@@ -1241,7 +1459,15 @@ public sealed class DesktopBoxManager
         int visibleIndex,
         IReadOnlyList<Rect> occupiedBounds)
     {
-        linkedWindow.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        // A manual-size window already has its native client bounds. Measuring it
+        // with an unbounded constraint can arrange the WPF root at its content
+        // size (even while the HWND and Width/Height stay at the saved size), so
+        // linked placement must only measure content-driven windows.
+        if (linkedWindow.GetManualWindowSizeState() is null)
+        {
+            linkedWindow.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        }
+
         var linkedBounds = linkedWindow.GetVisibleBounds();
         var linkedWidth = linkedBounds.Width > 1
             ? linkedBounds.Width
@@ -2043,17 +2269,7 @@ public sealed class DesktopBoxManager
         }
 
         window.ViewModel.LayoutSettings.ApplyPresetWithoutCallback(message.Preset);
-    }
-
-    private void ApplyBoxSizeMode(BoxSizeModeChangedMessage message)
-    {
-        if (!_windows.TryGetValue(message.BoxId, out var window))
-        {
-            return;
-        }
-
-        window.ViewModel.ApplySizeMode(
-            new BoxSizeModeState(message.IsFixed, message.Columns, message.Rows));
+        window.ResyncSizeToContent();
     }
 
     private void ApplyBoxPositionLockState(
@@ -2267,12 +2483,20 @@ public sealed class DesktopBoxManager
 
     private void OnWindowLocationChanged(object? sender, EventArgs e)
     {
-        if (_isAdjustingPosition || _closing)
+        if (sender is not DesktopBoxWindow draggedWindow)
         {
             return;
         }
 
-        if (sender is not DesktopBoxWindow draggedWindow)
+        var currentOrigin = new Point(draggedWindow.Left, draggedWindow.Top);
+        var previousOrigin = _lastWindowOrigins.TryGetValue(
+            draggedWindow.ViewModel.BoxId,
+            out var lastOrigin)
+            ? lastOrigin
+            : currentOrigin;
+        _lastWindowOrigins[draggedWindow.ViewModel.BoxId] = currentOrigin;
+
+        if (_isAdjustingPosition || _closing)
         {
             return;
         }
@@ -2289,22 +2513,99 @@ public sealed class DesktopBoxManager
             return;
         }
 
-        UpdateProjectAttachmentDropPreviews(draggedWindow);
+        if (draggedWindow.ViewModel.IsProjectBox)
+        {
+            ApplyLiveProjectLinkedDelta(
+                draggedWindow,
+                currentOrigin.X - previousOrigin.X,
+                currentOrigin.Y - previousOrigin.Y);
+        }
 
+        QueueDragFeedbackRefresh(draggedWindow);
+    }
+
+    private void ApplyLiveProjectLinkedDelta(
+        DesktopBoxWindow projectWindow,
+        double deltaLeft,
+        double deltaTop)
+    {
+        if ((Math.Abs(deltaLeft) <= double.Epsilon && Math.Abs(deltaTop) <= double.Epsilon)
+            || !_liveProjectAttachments.TryGetValue(
+                projectWindow.ViewModel.BoxId,
+                out var liveAttachments))
+        {
+            return;
+        }
+
+        var wasAdjustingPosition = _isAdjustingPosition;
         _isAdjustingPosition = true;
         try
         {
-            PerformSnappingAndAlignment(draggedWindow, applySnap: false);
+            foreach (var linkedBoxId in liveAttachments.LinkedBoxIds)
+            {
+                if (_windows.TryGetValue(linkedBoxId, out var linkedWindow)
+                    && linkedWindow.IsVisible)
+                {
+                    linkedWindow.Left += deltaLeft;
+                    linkedWindow.Top += deltaTop;
+                }
+            }
+
+            if (_paperTodoHost is null)
+            {
+                return;
+            }
+
+            foreach (var paperId in liveAttachments.LinkedPaperIds)
+            {
+                _paperTodoHost.TryOffsetProjectAttachmentPresentation(
+                    paperId,
+                    deltaLeft,
+                    deltaTop);
+            }
         }
         finally
         {
-            _isAdjustingPosition = false;
+            _isAdjustingPosition = wasAdjustingPosition;
+        }
+    }
+
+    private void QueueDragFeedbackRefresh(DesktopBoxWindow draggedWindow)
+    {
+        _pendingDragFeedbackWindow = draggedWindow;
+        if (Interlocked.Exchange(ref _dragFeedbackRefreshQueued, 1) == 1)
+        {
+            return;
         }
 
-        if (draggedWindow.ViewModel.IsProjectBox)
-        {
-            QueueProjectLinkedLayoutRefresh();
-        }
+        draggedWindow.Dispatcher.BeginInvoke(
+            new Action(() =>
+            {
+                Interlocked.Exchange(ref _dragFeedbackRefreshQueued, 0);
+                var pendingWindow = _pendingDragFeedbackWindow;
+                _pendingDragFeedbackWindow = null;
+                if (_closing
+                    || pendingWindow is null
+                    || !pendingWindow.IsVisible
+                    || System.Windows.Input.Mouse.LeftButton
+                        != System.Windows.Input.MouseButtonState.Pressed)
+                {
+                    return;
+                }
+
+                UpdateProjectAttachmentDropPreviews(pendingWindow);
+                _isAdjustingPosition = true;
+                try
+                {
+                    PerformSnappingAndAlignment(pendingWindow, applySnap: false);
+                }
+                finally
+                {
+                    _isAdjustingPosition = false;
+                }
+
+            }),
+            System.Windows.Threading.DispatcherPriority.Background);
     }
 
     private void OnWindowMouseUp(object sender, System.Windows.Input.MouseButtonEventArgs e)
@@ -2329,22 +2630,38 @@ public sealed class DesktopBoxManager
         var draggedBounds = draggedWindow.GetVisibleBounds();
         foreach (var window in _windows.Values)
         {
-            var isCandidate = window.IsVisible
-                && window.ViewModel.BoxId != draggedWindow.ViewModel.BoxId
-                && IsProjectAttachmentDropCandidate(window.GetVisibleBounds(), draggedBounds);
-            if (window.ViewModel.IsProjectBox)
+            if (!window.IsVisible
+                || window.ViewModel.BoxId == draggedWindow.ViewModel.BoxId)
             {
-                window.ViewModel.IsProjectAttachmentDropPreviewVisible =
-                    !draggedWindow.ViewModel.IsProjectBox
-                    && !draggedWindow.ViewModel.IsProjectFolder
-                    && isCandidate;
+                continue;
             }
 
-            if (window.ViewModel.IsProjectBox || window.ViewModel.IsProjectFolder)
+            var targetIsProject = window.ViewModel.IsProjectBox;
+            var targetIsProjectFolder = window.ViewModel.IsProjectFolder;
+            if (!targetIsProject && !targetIsProjectFolder)
             {
-                window.ViewModel.IsProjectGroupingDropPreviewVisible =
-                    draggedWindow.ViewModel.IsProjectBox && isCandidate;
+                continue;
             }
+
+            var showsAttachmentPreview = targetIsProject
+                && !draggedWindow.ViewModel.IsProjectBox
+                && !draggedWindow.ViewModel.IsProjectFolder;
+            var showsGroupingPreview = (targetIsProject || targetIsProjectFolder)
+                && draggedWindow.ViewModel.IsProjectBox;
+            if (!showsAttachmentPreview && !showsGroupingPreview)
+            {
+                window.ViewModel.IsProjectAttachmentDropPreviewVisible = false;
+                window.ViewModel.IsProjectGroupingDropPreviewVisible = false;
+                continue;
+            }
+
+            var isCandidate = IsProjectAttachmentDropCandidate(
+                window.GetVisibleBounds(),
+                draggedBounds);
+            window.ViewModel.IsProjectAttachmentDropPreviewVisible =
+                showsAttachmentPreview && isCandidate;
+            window.ViewModel.IsProjectGroupingDropPreviewVisible =
+                showsGroupingPreview && isCandidate;
         }
     }
 

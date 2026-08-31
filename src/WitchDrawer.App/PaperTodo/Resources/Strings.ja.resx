@@ -178,6 +178,9 @@ PaperTodo を手動でもう一度開いてください。問題が繰り返さ�
   <data name="MenuHeading" xml:space="preserve">
     <value>見出し</value>
   </data>
+  <data name="MenuArchive" xml:space="preserve">
+    <value>アーカイブ</value>
+  </data>
   <data name="MenuHide" xml:space="preserve">
     <value>隠す</value>
   </data>

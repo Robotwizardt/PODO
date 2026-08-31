@@ -26,13 +26,13 @@ public partial class DesktopPaperManagerWindow : Window
 
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
-        AppThemeManager.ApplyToWindow(this);
+        AppThemeManager.ApplyToWindow(this, WindowBackdropKind.Transient);
         ViewModel.Refresh();
     }
 
     private void OnThemeChanged(object? sender, AppTheme theme)
     {
-        AppThemeManager.ApplyToWindow(this);
+        AppThemeManager.ApplyToWindow(this, WindowBackdropKind.Transient);
     }
 
     private void OnHeaderMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -52,6 +52,14 @@ public partial class DesktopPaperManagerWindow : Window
         if (sender is FrameworkElement { Tag: DesktopPaperSummary paper })
         {
             ViewModel.ShowPaper(paper);
+        }
+    }
+
+    private void OnArchivePaperClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: DesktopPaperSummary paper })
+        {
+            ViewModel.ArchivePaper(paper);
         }
     }
 

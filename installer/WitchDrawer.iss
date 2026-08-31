@@ -4,7 +4,7 @@
 ;
 ; Preprocessor vars:
 ;   MyAppVersion   — passed via /DMyAppVersion=1.3.0 (matches Directory.Build.props)
-;   PublishDir     — the dotnet publish output folder containing WitchDrawer.App.exe
+;   PublishDir     — the dotnet publish output folder containing PODO.exe
 ;
 ; NOTE: Only the main exe + pdbs ship in the installer; the app is a
 ; self-contained single-file build, so no runtime needs to be installed.
@@ -26,7 +26,7 @@
 #define MyAppName "WitchDrawer"
 #define MyAppPublisher "Robotwizardt"
 #define MyAppURL "https://github.com/Robotwizardt/PODO"
-#define MyAppExeName "WitchDrawer.App.exe"
+#define MyAppExeName "PODO.exe"
 
 [Setup]
 AppId={{8F3C2A1E-7B4D-4E6F-9A2C-WITCHDRAWER111}

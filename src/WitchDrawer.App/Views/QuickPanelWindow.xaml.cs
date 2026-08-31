@@ -68,7 +68,7 @@ public partial class QuickPanelWindow : Window
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
         UpdateIconDisplayMetrics(VisualTreeHelper.GetDpi(this));
-        AppThemeManager.ApplyToWindow(this);
+        AppThemeManager.ApplyToWindow(this, WindowBackdropKind.Transient);
     }
 
     private void OnDpiChanged(object sender, DpiChangedEventArgs e)
@@ -83,7 +83,7 @@ public partial class QuickPanelWindow : Window
 
     private void OnThemeChanged(object? sender, AppTheme theme)
     {
-        AppThemeManager.ApplyToWindow(this);
+        AppThemeManager.ApplyToWindow(this, WindowBackdropKind.Transient);
     }
 
     private void OnHeaderMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -91,6 +91,22 @@ public partial class QuickPanelWindow : Window
         if (e.ButtonState == MouseButtonState.Pressed)
         {
             DragMove();
+        }
+    }
+
+    private void OnHoverCardMouseEnter(object sender, MouseEventArgs e)
+    {
+        if (sender is UIElement element)
+        {
+            WindowMotion.AnimateTranslateY(element, -1, 120);
+        }
+    }
+
+    private void OnHoverCardMouseLeave(object sender, MouseEventArgs e)
+    {
+        if (sender is UIElement element)
+        {
+            WindowMotion.AnimateTranslateY(element, 0, 180);
         }
     }
 

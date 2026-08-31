@@ -178,6 +178,9 @@ PaperTodo를 수동으로 다시 여세요. 문제가 반복되면 PC를 다시 
   <data name="MenuHeading" xml:space="preserve">
     <value>제목</value>
   </data>
+  <data name="MenuArchive" xml:space="preserve">
+    <value>보관</value>
+  </data>
   <data name="MenuHide" xml:space="preserve">
     <value>숨기기</value>
   </data>

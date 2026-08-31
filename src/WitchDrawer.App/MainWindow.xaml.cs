@@ -38,6 +38,7 @@ public partial class MainWindow : Window
     private ListBoxItem? _boxDropTarget;
     private bool _isBoxVisualStylePageOpen;
     private bool _isBoxVisualStyleTransitioning;
+    private VisualTransition? _boxControlsTransition;
     public event EventHandler? WindowHidden;
     public event EventHandler? WindowClosing;
     public event EventHandler? DesktopShellRestarted;
@@ -63,6 +64,7 @@ public partial class MainWindow : Window
         _hotKeySettings = hotKeySettings;
         _quickPanelHotKey = quickPanelHotKey;
         InitializeComponent();
+        ConfigureBoxControlsTransition();
         UpdateHotKeyUi("点击按钮可修改");
         Loaded += OnLoaded;
         DpiChanged += OnDpiChanged;
@@ -176,13 +178,87 @@ public partial class MainWindow : Window
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
         UpdateIconDisplayMetrics(VisualTreeHelper.GetDpi(this));
-        AppThemeManager.ApplyToWindow(this);
+        AppThemeManager.ApplyToWindow(this, WindowBackdropKind.MainWindow);
         WindowMotion.PopIn(this, 0.985, 160);
+    }
+
+    private void ConfigureBoxControlsTransition()
+    {
+        foreach (var groupValue in VisualStateManager.GetVisualStateGroups(BoxControlsPageHost))
+        {
+            if (groupValue is not VisualStateGroup group)
+            {
+                continue;
+            }
+
+            if (!string.Equals(group.Name, "BoxControlsPageStates", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            _boxControlsTransition = group.Transitions.Count > 0
+                ? group.Transitions[0] as VisualTransition
+                : null;
+
+            if (_boxControlsTransition is null)
+            {
+                _boxControlsTransition = new VisualTransition
+                {
+                    GeneratedEasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+                };
+                group.Transitions.Add(_boxControlsTransition);
+            }
+
+            UpdateBoxControlsTransitionDuration();
+            return;
+        }
+    }
+
+    private void UpdateBoxControlsTransitionDuration()
+    {
+        if (_boxControlsTransition is null)
+        {
+            return;
+        }
+
+        _boxControlsTransition.GeneratedDuration = TryFindResource("MotionDuration") is Duration duration
+            ? duration
+            : new Duration();
     }
 
     private void OnDpiChanged(object sender, DpiChangedEventArgs e)
     {
         UpdateIconDisplayMetrics(e.NewDpi);
+    }
+
+    private void OnMainWindowSizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (HeaderStatusPill is null || HeaderShortcutPill is null)
+        {
+            return;
+        }
+
+        // Keep the shell controls from competing with the core content at compact widths.
+        // These are presentation-only affordances; bindings and commands remain untouched.
+        var width = e.NewSize.Width;
+        HeaderShortcutPill.Visibility = width >= 900 ? Visibility.Visible : Visibility.Collapsed;
+        HeaderStatusPill.Visibility = width >= 840 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void OnHoverCardMouseEnter(object sender, MouseEventArgs e)
+    {
+        if (sender is UIElement element)
+        {
+            WindowMotion.AnimateTranslateY(element, -1, 120);
+        }
+    }
+
+    private void OnHoverCardMouseLeave(object sender, MouseEventArgs e)
+    {
+        if (sender is UIElement element)
+        {
+            WindowMotion.AnimateTranslateY(element, 0, 180);
+        }
     }
 
     private void UpdateIconDisplayMetrics(DpiScale dpi)
@@ -192,7 +268,7 @@ public partial class MainWindow : Window
 
     private void OnThemeChanged(object? sender, AppTheme theme)
     {
-        AppThemeManager.ApplyToWindow(this);
+        AppThemeManager.ApplyToWindow(this, WindowBackdropKind.MainWindow);
     }
 
     private void RegisterInitialHotKey()
@@ -514,6 +590,18 @@ public partial class MainWindow : Window
         await OpenNotesFromProjectAsync();
     }
 
+    private async void OnSearchLauncherClicked(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            await _quickPanel.ToggleAsync();
+        }
+        catch (Exception exception)
+        {
+            _logger.Error(exception, "Failed to toggle quick panel from search launcher.");
+        }
+    }
+
     internal Task OpenNotesFromProjectAsync()
     {
         _paperTodoHost.CreateNotePaper();
@@ -829,10 +917,11 @@ public partial class MainWindow : Window
         _isBoxVisualStylePageOpen = true;
         BoxControlsPrimaryPanel.IsHitTestVisible = false;
         BoxVisualStyleSecondaryPanel.IsHitTestVisible = true;
+        UpdateBoxControlsTransitionDuration();
         VisualStateManager.GoToElementState(
             BoxControlsPageHost,
             "VisualStyleSelectionState",
-            useTransitions: true);
+            useTransitions: WindowMotion.AreAnimationsEnabled);
     }
 
     private void OnCloseBoxVisualStylePage(object sender, RoutedEventArgs e)
@@ -853,9 +942,15 @@ public partial class MainWindow : Window
         try
         {
             TryAnimateVisualStyleSelection(button);
-            await Task.Delay(170);
+            if (WindowMotion.AreAnimationsEnabled)
+            {
+                await Task.Delay(170);
+            }
             await ViewModel.SetSelectedBoxVisualStyleCommand.ExecuteAsync(option);
-            await Task.Delay(40);
+            if (WindowMotion.AreAnimationsEnabled)
+            {
+                await Task.Delay(40);
+            }
         }
         catch (Exception exception)
         {
@@ -974,14 +1069,24 @@ public partial class MainWindow : Window
         _isBoxVisualStylePageOpen = false;
         BoxVisualStyleSecondaryPanel.IsHitTestVisible = false;
         BoxControlsPrimaryPanel.IsHitTestVisible = true;
+        UpdateBoxControlsTransitionDuration();
         VisualStateManager.GoToElementState(
             BoxControlsPageHost,
             "PrimaryControlsState",
-            useTransitions: true);
+            useTransitions: WindowMotion.AreAnimationsEnabled);
     }
 
     private static void AnimateVisualStyleSelection(ScaleTransform scaleTransform)
     {
+        if (!WindowMotion.AreAnimationsEnabled)
+        {
+            scaleTransform.BeginAnimation(ScaleTransform.ScaleXProperty, null);
+            scaleTransform.BeginAnimation(ScaleTransform.ScaleYProperty, null);
+            scaleTransform.ScaleX = 1;
+            scaleTransform.ScaleY = 1;
+            return;
+        }
+
         var easing = new BackEase
         {
             Amplitude = 0.3,
@@ -1094,7 +1199,7 @@ public partial class MainWindow : Window
     {
         RenameBoxPopup.IsOpen = true;
         TxtRenameBox.Text = ViewModel.SelectedBox?.Name ?? "";
-        
+
         Dispatcher.InvokeAsync(() =>
         {
             TxtRenameBox.Focus();

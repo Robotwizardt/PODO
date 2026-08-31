@@ -16,9 +16,13 @@ public static class FileDialogNavigator
     private const uint WmUser = 0x0400;
     private const uint CdmGetFolderPath = WmUser + 102;
     private const uint WmSetText = 0x000C;
+    private const uint WmGetText = 0x000D;
+    private const uint WmGetTextLength = 0x000E;
     private const uint WmKeyDown = 0x0100;
     private const uint WmKeyUp = 0x0101;
     private const uint BmClick = 0x00F5;
+    private const int FileNameEditId = 0x480;
+    private const int FileNameComboId = 0x47C;
     private const string LegacyFileNameEditAutomationId = "1148";
     private const string AddressEditAutomationId = "41477";
     private const ushort VirtualKeyControl = 0x11;
@@ -65,9 +69,23 @@ public static class FileDialogNavigator
                 return FileDialogNavigationResult.Failure("目录不可用");
             }
 
-            if (!TryGetFileNameWithAutomation(dialogHandle, out var originalFileName))
+            string? originalFileName = null;
+            if (TryGetFileNameWithAutomation(dialogHandle, out var detectedFileName))
             {
-                return FileDialogNavigationResult.Failure("无法保护当前文件名，已取消导航");
+                originalFileName = detectedFileName;
+            }
+            else
+            {
+                var nativeFileNameEdit = FindVisibleNativeFileNameEdit(dialogHandle);
+                if (nativeFileNameEdit != nint.Zero)
+                {
+                    if (!TryGetFileNameWithNativeControl(nativeFileNameEdit, out var nativeFileName))
+                    {
+                        return FileDialogNavigationResult.Failure("无法保护当前文件名，已取消导航");
+                    }
+
+                    originalFileName = nativeFileName;
+                }
             }
 
             if (!TryNavigateWithAddressBar(
@@ -77,7 +95,8 @@ public static class FileDialogNavigator
                     cancellationToken,
                     out var errorMessage))
             {
-                if (!RestoreFileNameWithAutomation(dialogHandle, originalFileName))
+                if (originalFileName is not null
+                    && !RestoreFileName(dialogHandle, originalFileName))
                 {
                     errorMessage = "导航已停止，但无法恢复原文件名";
                 }
@@ -104,7 +123,7 @@ public static class FileDialogNavigator
     private static bool TryNavigateWithAddressBar(
         nint dialogHandle,
         string targetPath,
-        string originalFileName,
+        string? originalFileName,
         CancellationToken cancellationToken,
         out string errorMessage)
     {
@@ -137,7 +156,8 @@ public static class FileDialogNavigator
 
             if (IsDialogAtDirectory(dialogHandle, targetPath))
             {
-                if (!RestoreFileNameWithAutomation(dialogHandle, originalFileName))
+                if (originalFileName is not null
+                    && !RestoreFileName(dialogHandle, originalFileName))
                 {
                     errorMessage = "无法恢复原文件名，已停止后续操作";
                     return false;
@@ -545,26 +565,34 @@ public static class FileDialogNavigator
         return match;
     }
 
-    private static bool RestoreFileNameWithAutomation(nint dialogHandle, string fileName)
+    private static bool RestoreFileName(nint dialogHandle, string fileName)
     {
         try
         {
-            if (!TryGetFileNamePattern(dialogHandle, out var valuePattern))
+            if (TryGetFileNamePattern(dialogHandle, out var valuePattern))
             {
-                return false;
-            }
+                if (!string.Equals(valuePattern.Current.Value, fileName, StringComparison.Ordinal))
+                {
+                    valuePattern.SetValue(fileName);
+                }
 
-            if (!string.Equals(valuePattern.Current.Value, fileName, StringComparison.Ordinal))
-            {
-                valuePattern.SetValue(fileName);
+                return string.Equals(valuePattern.Current.Value, fileName, StringComparison.Ordinal);
             }
-
-            return string.Equals(valuePattern.Current.Value, fileName, StringComparison.Ordinal);
         }
         catch (ElementNotAvailableException)
         {
+        }
+
+        var nativeEdit = FindVisibleNativeFileNameEdit(dialogHandle);
+        if (nativeEdit == nint.Zero)
+        {
             return false;
         }
+
+        var text = new StringBuilder(fileName);
+        _ = SendMessageW(nativeEdit, WmSetText, nint.Zero, text);
+        return TryGetFileNameWithNativeControl(nativeEdit, out var restoredFileName)
+            && string.Equals(restoredFileName, fileName, StringComparison.Ordinal);
     }
 
     private static bool TryGetFileNameWithAutomation(nint dialogHandle, out string fileName)
@@ -584,6 +612,46 @@ public static class FileDialogNavigator
         {
             return false;
         }
+    }
+
+    private static nint FindVisibleNativeFileNameEdit(nint dialogHandle)
+    {
+        nint match = nint.Zero;
+        _ = EnumChildWindows(
+            dialogHandle,
+            (child, _) =>
+            {
+                if (IsWindowVisible(child)
+                    && GetDlgCtrlID(child) is FileNameEditId or FileNameComboId
+                    && string.Equals(GetClassName(child), "Edit", StringComparison.Ordinal))
+                {
+                    match = child;
+                }
+
+                return match == nint.Zero;
+            },
+            nint.Zero);
+        return match;
+    }
+
+    private static bool TryGetFileNameWithNativeControl(nint editHandle, out string fileName)
+    {
+        fileName = string.Empty;
+        if (!IsWindow(editHandle))
+        {
+            return false;
+        }
+
+        var length = SendMessageW(editHandle, WmGetTextLength, nint.Zero, nint.Zero).ToInt64();
+        if (length < 0 || length >= int.MaxValue)
+        {
+            return false;
+        }
+
+        var value = new StringBuilder(checked((int)length + 1));
+        _ = SendMessageW(editHandle, WmGetText, (nint)value.Capacity, value);
+        fileName = value.ToString();
+        return true;
     }
 
     private static bool TryGetFileNamePattern(
@@ -789,6 +857,10 @@ public static class FileDialogNavigator
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool IsWindow(nint window);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsWindowVisible(nint window);
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]

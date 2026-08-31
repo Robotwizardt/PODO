@@ -110,6 +110,56 @@ public sealed class FileDialogWindowDetectorTests
         }
     }
 
+    [Fact]
+    public async Task NavigateToDirectoryAsync_NavigatesAnOpenFolderDialog()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "PODO-FolderDialogTests", Guid.NewGuid().ToString("N"));
+        var target = Path.Combine(root, "target");
+        const string markerName = "PODO-folder-navigation-marker";
+        Directory.CreateDirectory(Path.Combine(target, markerName));
+        var title = "PODO folder dialog navigation " + Guid.NewGuid().ToString("N");
+        var dialogThread = new Thread(() =>
+        {
+            var dialog = new OpenFolderDialog
+            {
+                Title = title,
+                InitialDirectory = root
+            };
+            _ = dialog.ShowDialog();
+        });
+        dialogThread.SetApartmentState(ApartmentState.STA);
+        dialogThread.Start();
+
+        nint handle = nint.Zero;
+        try
+        {
+            Assert.True(SpinWait.SpinUntil(
+                () => (handle = FindWindowW("#32770", title)) != nint.Zero
+                    && FileDialogWindowDetector.TryGetInfo(handle, out _),
+                TimeSpan.FromSeconds(5)));
+
+            var result = await FileDialogNavigator.NavigateToDirectoryAsync(handle, target);
+
+            Assert.True(result.Succeeded, result.ErrorMessage);
+            Assert.True(
+                SpinWait.SpinUntil(
+                    () => HasVisibleFileItem(handle, markerName),
+                    TimeSpan.FromSeconds(5)),
+                "The target directory marker was not shown in the folder list.");
+            Assert.True(IsWindow(handle), "Navigation must not confirm or close the folder dialog.");
+        }
+        finally
+        {
+            if (handle != nint.Zero)
+            {
+                _ = PostMessageW(handle, 0x0010, nint.Zero, nint.Zero);
+            }
+
+            Assert.True(dialogThread.Join(TimeSpan.FromSeconds(5)));
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     private static bool HasVisibleFileItem(nint dialog, string name)
     {
         try

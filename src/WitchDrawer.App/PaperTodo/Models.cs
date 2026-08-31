@@ -600,6 +600,12 @@ public sealed class PaperItem
     public bool Done { get; set; }
     public int Order { get; set; }
 
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool IsPinned { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? TextColor { get; set; }
+
     [JsonInclude]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? LinkedPaperId { get; private set; }

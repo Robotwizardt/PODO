@@ -412,6 +412,7 @@ public sealed class StateStore
             foreach (var item in paper.Items)
             {
                 item.Text ??= "";
+                item.TextColor = TodoTextColors.Normalize(item.TextColor);
             }
         }
     }
@@ -673,6 +674,7 @@ public sealed class StateStore
 
                 item.Order = i;
                 item.Text ??= "";
+                item.TextColor = TodoTextColors.Normalize(item.TextColor);
                 if (item.Done)
                 {
                     item.ReminderAt = null;
@@ -682,6 +684,12 @@ public sealed class StateStore
                 {
                     item.ReminderTriggered = false;
                 }
+            }
+
+            if (paper.Type == PaperTypes.Todo)
+            {
+                paper.Items = TodoRules.OrderForDisplay(paper.Items).ToList();
+                TodoRules.NormalizeOrders(paper.Items);
             }
         }
     }

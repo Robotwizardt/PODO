@@ -60,7 +60,19 @@ public static class Strings
             ["TodoReminderSoundBeep"] = ["蜂鸣", "Beep", "ビープ", "비프"],
             ["TodoReminderSoundExclamation"] = ["感叹", "Exclamation", "警告", "경고"],
             ["TodoReminderSoundHand"] = ["严重警告", "Critical stop", "重大な警告", "심각한 경고"],
-            ["TodoReminderSoundQuestion"] = ["询问", "Question", "質問", "질문"]
+            ["TodoReminderSoundQuestion"] = ["询问", "Question", "質問", "질문"],
+            ["MenuPinTodo"] = ["置顶此待办", "Pin this todo", "このToDoを固定", "이 할 일 고정"],
+            ["MenuUnpinTodo"] = ["取消置顶", "Unpin todo", "固定を解除", "할 일 고정 해제"],
+            ["MenuPinSelectedTodos"] = ["置顶所选待办", "Pin selected todos", "選択したToDoを固定", "선택한 할 일 고정"],
+            ["MenuUnpinSelectedTodos"] = ["取消所选待办置顶", "Unpin selected todos", "選択したToDoの固定を解除", "선택한 할 일 고정 해제"],
+            ["MenuTodoTextColor"] = ["字体颜色", "Text color", "文字色", "글자 색"],
+            ["TodoTextColorDefault"] = ["默认", "Default", "既定", "기본"],
+            ["TodoTextColorRed"] = ["红色", "Red", "赤", "빨강"],
+            ["TodoTextColorOrange"] = ["橙色", "Orange", "オレンジ", "주황"],
+            ["TodoTextColorGreen"] = ["绿色", "Green", "緑", "초록"],
+            ["TodoTextColorBlue"] = ["蓝色", "Blue", "青", "파랑"],
+            ["TodoTextColorPurple"] = ["紫色", "Purple", "紫", "보라"],
+            ["TodoPinnedIndicator"] = ["已置顶", "Pinned", "固定済み", "고정됨"]
         };
 
     public static string Get(string key)

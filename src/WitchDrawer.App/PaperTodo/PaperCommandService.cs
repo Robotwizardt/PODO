@@ -808,6 +808,8 @@ internal sealed class PaperCommandService
         string Text,
         bool Done,
         int Order,
+        bool IsPinned,
+        string? TextColor,
         string? LinkedPaperId,
         string? LinkedPath,
         DateTimeOffset? ReminderAt,
@@ -819,6 +821,8 @@ internal sealed class PaperCommandService
                 item.Text,
                 item.Done,
                 item.Order,
+                item.IsPinned,
+                item.TextColor,
                 item.LinkedPaperId,
                 item.LinkedPath,
                 item.ReminderAt,
@@ -829,6 +833,8 @@ internal sealed class PaperCommandService
             Item.Text = Text;
             Item.Done = Done;
             Item.Order = Order;
+            Item.IsPinned = IsPinned;
+            Item.TextColor = TextColor;
             Item.RestoreQuickLaunch(LinkedPaperId, LinkedPath);
             Item.ReminderAt = ReminderAt;
             Item.ReminderTriggered = ReminderTriggered;

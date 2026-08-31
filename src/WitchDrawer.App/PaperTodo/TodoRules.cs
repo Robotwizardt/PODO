@@ -9,6 +9,8 @@ internal static class TodoRules
     public static bool HasMeaningfulContent(PaperItem item) =>
         !string.IsNullOrWhiteSpace(item.Text) ||
         item.Done ||
+        item.IsPinned ||
+        item.TextColor != null ||
         item.ReminderAt.HasValue ||
         item.ReminderTriggered ||
         !string.IsNullOrWhiteSpace(item.LinkedPaperId) ||
@@ -16,6 +18,8 @@ internal static class TodoRules
 
     public static bool HasNonTextContent(PaperItem item) =>
         item.Done ||
+        item.IsPinned ||
+        item.TextColor != null ||
         item.ReminderAt.HasValue ||
         item.ReminderTriggered ||
         !string.IsNullOrWhiteSpace(item.LinkedPaperId) ||
@@ -31,6 +35,8 @@ internal static class TodoRules
             Text = item.Text,
             Done = item.Done,
             Order = item.Order,
+            IsPinned = item.IsPinned,
+            TextColor = item.TextColor,
             ReminderAt = item.ReminderAt,
             ReminderTriggered = item.ReminderTriggered
         };
@@ -40,6 +46,9 @@ internal static class TodoRules
 
     public static List<PaperItem> CloneAll(IEnumerable<PaperItem> items) =>
         items.Select(Clone).ToList();
+
+    public static IEnumerable<PaperItem> OrderForDisplay(IEnumerable<PaperItem> items) =>
+        items.OrderByDescending(item => item.IsPinned).ThenBy(item => item.Order);
 
     public static void NormalizeOrders(IList<PaperItem> items)
     {

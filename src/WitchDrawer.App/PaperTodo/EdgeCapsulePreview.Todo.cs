@@ -75,12 +75,15 @@ internal sealed class TodoEdgeCapsulePreviewProvider : IEdgeCapsulePreviewProvid
                 done++;
             }
 
-            // Keep only the stable first 12 items by Order. With a fixed-size insertion list this
-            // is one model pass, O(n * 12), and never sorts/materializes the complete todo model.
+            // Keep only the stable first 12 items in display order (pinned first, then Order).
+            // With a fixed-size insertion list this is one model pass, O(n * 12), and never
+            // sorts/materializes the complete todo model.
             var insertionIndex = selected.Count;
             for (var index = 0; index < selected.Count; index++)
             {
-                if (item.Order < selected[index].Order)
+                if ((item.IsPinned && !selected[index].IsPinned) ||
+                    (item.IsPinned == selected[index].IsPinned &&
+                     item.Order < selected[index].Order))
                 {
                     insertionIndex = index;
                     break;
@@ -315,9 +318,16 @@ internal sealed class TodoEdgeCapsulePreviewView : EdgeCapsuleLivePreviewView
             TextWrapping = TextWrapping.Wrap,
             VerticalAlignment = VerticalAlignment.Center
         };
-        text.SetResourceReference(
-            TextBlock.ForegroundProperty,
-            item.Done ? "WeakTextBrushKey" : "TextBrushKey");
+        if (item.TextColor == null)
+        {
+            text.SetResourceReference(
+                TextBlock.ForegroundProperty,
+                item.Done ? "WeakTextBrushKey" : "TextBrushKey");
+        }
+        else
+        {
+            text.Foreground = TodoTextColors.BrushFor(item.TextColor);
+        }
         if (item.Done)
         {
             text.TextDecorations = TextDecorations.Strikethrough;
@@ -341,6 +351,16 @@ internal sealed class TodoEdgeCapsulePreviewView : EdgeCapsuleLivePreviewView
             Margin = new Thickness(1, 0, 1, 0),
             VerticalAlignment = VerticalAlignment.Center
         };
+
+        if (item.IsPinned)
+        {
+            var pin = TodoPinIcon.Create(
+                Theme.ActiveBrush,
+                AppTypography.Scale(10.5),
+                Strings.Get("TodoPinnedIndicator"));
+            pin.Margin = new Thickness(1, 0, 1, 0);
+            markers.Children.Add(pin);
+        }
 
         if (item.ReminderAt.HasValue || item.ReminderTriggered)
         {

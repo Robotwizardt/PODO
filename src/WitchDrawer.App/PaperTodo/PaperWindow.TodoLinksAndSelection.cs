@@ -650,7 +650,11 @@ public sealed partial class PaperWindow
         }
 
         text.IsSweepSelected = selected;
-        text.Foreground = text.IsDone ? BrightWeakTextBrush : TextBrush;
+        var item = _paper.Items.FirstOrDefault(candidate =>
+            string.Equals(candidate.Id, itemId, StringComparison.Ordinal));
+        text.Foreground = item == null
+            ? text.IsDone ? BrightWeakTextBrush : TextBrush
+            : TodoForegroundBrush(item);
     }
 
     private List<PaperItem> SelectedTodoItems()
@@ -831,6 +835,14 @@ public sealed partial class PaperWindow
                 : Strings.Get("MenuCompleteSelectedTodos"),
             (_, _) => ApplyDoneToSelectedTodos(
                 !selected.All(candidate => candidate.Done))));
+        menu.Items.Add(MenuItem(
+            selected.All(candidate => candidate.IsPinned)
+                ? Strings.Get("MenuUnpinSelectedTodos")
+                : Strings.Get("MenuPinSelectedTodos"),
+            (_, _) => SetTodoPinned(
+                selected,
+                !selected.All(candidate => candidate.IsPinned))));
+        menu.Items.Add(BuildTodoTextColorMenu(selected));
         menu.Items.Add(MenuSeparator());
         menu.Items.Add(MenuItem(
             Strings.Format("MenuDeleteSelectedTodos", selected.Count),

@@ -494,6 +494,7 @@ public sealed partial class PaperWindow
         });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         if (showTodoReminderControl)
         {
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -527,8 +528,8 @@ public sealed partial class PaperWindow
             IsDone = item.Done,
             BorderThickness = new Thickness(0),
             Background = Brushes.Transparent,
-            Foreground = item.Done ? BrightWeakTextBrush : TextBrush,
-            CaretBrush = TextBrush,
+            Foreground = TodoForegroundBrush(item),
+            CaretBrush = TodoTextColors.BrushFor(item.TextColor),
             FontFamily = AppTypography.FontFamilyFor(content: true, bold: _controller.State.TodoTextBold),
             FontSize = metrics.TextFontSize,
             FontWeight = AppTypography.FontWeightFor(_controller.State.TodoTextBold),
@@ -603,7 +604,7 @@ public sealed partial class PaperWindow
                 reminderCountdown.Visibility = Visibility.Hidden;
             }
             text.IsDone = true;
-            text.Foreground = BrightWeakTextBrush;
+            text.Foreground = TodoForegroundBrush(item);
             _controller.MarkDirty();
 
             if (_controller.State.AutoClearCompletedTodos)
@@ -645,7 +646,7 @@ public sealed partial class PaperWindow
                 _controller.NotifyTodoReminderCollectionChanged();
             }
             text.IsDone = false;
-            text.Foreground = TextBrush;
+            text.Foreground = TodoForegroundBrush(item);
             _controller.MarkDirty();
 
             if (MoveTodoItemsAfterDoneChange([item], done: false))
@@ -676,6 +677,13 @@ public sealed partial class PaperWindow
             var itemMenu = CreateContextMenu();
             MenuItem? reminderMenu = null;
             itemMenu.Items.Add(MenuHeader(Strings.Get("MenuTodoItem")));
+            itemMenu.Items.Add(MenuItem(
+                item.IsPinned
+                    ? Strings.Get("MenuUnpinTodo")
+                    : Strings.Get("MenuPinTodo"),
+                (_, _) => SetTodoPinned([item], !item.IsPinned)));
+            itemMenu.Items.Add(BuildTodoTextColorMenu([item]));
+            itemMenu.Items.Add(MenuSeparator());
             if (hasLinkedPaper)
             {
                 var openMenuText = runLinkedScriptOnClick
@@ -745,11 +753,19 @@ public sealed partial class PaperWindow
         Grid.SetColumn(text, 1);
         grid.Children.Add(text);
 
+        if (item.IsPinned)
+        {
+            var pinnedIndicator = BuildTodoPinnedIndicator();
+            AttachItemContextMenu(pinnedIndicator);
+            Grid.SetColumn(pinnedIndicator, 2);
+            grid.Children.Add(pinnedIndicator);
+        }
+
         if (hasLinkedPath)
         {
             var pathLinkButton = BuildTodoPathLinkButton(item, text, metrics);
             AttachItemContextMenu(pathLinkButton);
-            Grid.SetColumn(pathLinkButton, 2);
+            Grid.SetColumn(pathLinkButton, 3);
             grid.Children.Add(pathLinkButton);
         }
         else if (hasLinkedPaper)
@@ -972,7 +988,7 @@ public sealed partial class PaperWindow
             };
             AttachItemContextMenu(linkButton);
 
-            Grid.SetColumn(linkButton, 2);
+            Grid.SetColumn(linkButton, 3);
             grid.Children.Add(linkButton);
         }
 
@@ -996,7 +1012,7 @@ public sealed partial class PaperWindow
                 reminderHost.Children.Add(reminderCountdown);
             }
 
-            Grid.SetColumn(reminderHost, 3);
+            Grid.SetColumn(reminderHost, 4);
             grid.Children.Add(reminderHost);
         }
 
@@ -1049,7 +1065,7 @@ public sealed partial class PaperWindow
         };
         AttachItemContextMenu(handle);
 
-        Grid.SetColumn(handle, showTodoReminderControl ? 4 : 3);
+        Grid.SetColumn(handle, showTodoReminderControl ? 5 : 4);
         grid.Children.Add(handle);
 
         row.Child = grid;
@@ -1918,7 +1934,7 @@ public sealed partial class PaperWindow
         var content = new TextBlock
         {
             Text = text,
-            Foreground = done ? BrightWeakTextBrush : TextBrush,
+            Foreground = item == null ? TextBrush : TodoForegroundBrush(item),
             FontFamily = AppTypography.FontFamilyFor(content: true, bold: _controller.State.TodoTextBold),
             FontSize = metrics.GhostTextFontSize,
             FontWeight = AppTypography.FontWeightFor(_controller.State.TodoTextBold),
@@ -2089,7 +2105,7 @@ public sealed partial class PaperWindow
 
     private IEnumerable<PaperItem> OrderedItems()
     {
-        return _paper.Items.OrderBy(i => i.Order).ToList();
+        return TodoRules.OrderForDisplay(_paper.Items).ToList();
     }
 
     private void NormalizeTodoItems()
@@ -2099,13 +2115,128 @@ public sealed partial class PaperWindow
             return;
         }
 
-        var ordered = _paper.Items.ToList();
+        var ordered = TodoRules.OrderForDisplay(_paper.Items).ToList();
         if (ordered.Count == 0)
         {
             ordered.Add(new PaperItem());
         }
 
         _paper.Items = ordered;
+    }
+
+    private static Brush TodoForegroundBrush(PaperItem item) =>
+        item.Done && item.TextColor == null
+            ? BrightWeakTextBrush
+            : TodoTextColors.BrushFor(item.TextColor);
+
+    private FrameworkElement BuildTodoPinnedIndicator()
+    {
+        var indicator = TodoPinIcon.Create(
+            Theme.ActiveBrush,
+            AppTypography.Scale(12),
+            Strings.Get("TodoPinnedIndicator"));
+        indicator.Margin = new Thickness(2, 0, 2, 0);
+        indicator.VerticalAlignment = VerticalAlignment.Center;
+        return indicator;
+    }
+
+    private MenuItem BuildTodoTextColorMenu(IReadOnlyList<PaperItem> items)
+    {
+        var menu = new MenuItem
+        {
+            Header = Strings.Get("MenuTodoTextColor"),
+            Padding = new Thickness(8, 4, 10, 4),
+            Background = Brushes.Transparent
+        };
+        menu.SetResourceReference(Control.ForegroundProperty, "TextBrushKey");
+
+        AddChoice(null, "TodoTextColorDefault");
+        AddChoice(TodoTextColors.Red, "TodoTextColorRed");
+        AddChoice(TodoTextColors.Orange, "TodoTextColorOrange");
+        AddChoice(TodoTextColors.Green, "TodoTextColorGreen");
+        AddChoice(TodoTextColors.Blue, "TodoTextColorBlue");
+        AddChoice(TodoTextColors.Purple, "TodoTextColorPurple");
+        return menu;
+
+        void AddChoice(string? color, string labelKey)
+        {
+            var choice = MenuItem(
+                Strings.Get(labelKey),
+                (_, _) => SetTodoTextColor(items, color));
+            choice.IsCheckable = true;
+            choice.IsChecked = items.Count > 0 &&
+                items.All(item => TodoTextColors.Normalize(item.TextColor) == color);
+            choice.Header = BuildTodoTextColorChoiceHeader(
+                Strings.Get(labelKey),
+                color);
+            menu.Items.Add(choice);
+        }
+    }
+
+    private static FrameworkElement BuildTodoTextColorChoiceHeader(
+        string label,
+        string? color)
+    {
+        var panel = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        panel.Children.Add(new Border
+        {
+            Width = AppTypography.Scale(11),
+            Height = AppTypography.Scale(11),
+            Margin = new Thickness(0, 0, 7, 0),
+            CornerRadius = new CornerRadius(AppTypography.Scale(5.5)),
+            Background = TodoTextColors.BrushFor(color),
+            BorderBrush = Theme.PaperBorderBrush,
+            BorderThickness = new Thickness(1)
+        });
+        panel.Children.Add(new TextBlock
+        {
+            Text = label,
+            VerticalAlignment = VerticalAlignment.Center
+        });
+        return panel;
+    }
+
+    private void SetTodoTextColor(IReadOnlyList<PaperItem> items, string? color)
+    {
+        var normalized = TodoTextColors.Normalize(color);
+        var changed = items
+            .Where(item => TodoTextColors.Normalize(item.TextColor) != normalized)
+            .ToList();
+        if (changed.Count == 0)
+        {
+            return;
+        }
+
+        PushUndoSnapshot();
+        foreach (var item in changed)
+        {
+            item.TextColor = normalized;
+        }
+        _controller.MarkDirty();
+        ReconcileTodoRows(changed.Select(item => item.Id));
+    }
+
+    private void SetTodoPinned(IReadOnlyList<PaperItem> items, bool isPinned)
+    {
+        var changed = items.Where(item => item.IsPinned != isPinned).ToList();
+        if (changed.Count == 0)
+        {
+            return;
+        }
+
+        PushUndoSnapshot();
+        foreach (var item in changed)
+        {
+            item.IsPinned = isPinned;
+        }
+        NormalizeTodoItems();
+        NormalizeOrders();
+        _controller.MarkDirty();
+        ReconcileTodoRows(changed.Select(item => item.Id));
     }
 
     private string? CurrentFocusedTodoItemId()

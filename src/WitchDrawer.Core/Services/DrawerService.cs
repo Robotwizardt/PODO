@@ -9,6 +9,8 @@ public sealed class DrawerService
     private readonly AppPaths _paths;
     private readonly DrawerRepository _repository;
     private readonly SemaphoreSlim _boundSyncGate = new(1, 1);
+    private RecycleBinService? _recycleBinService;
+    private readonly object _recycleBinGate = new();
 
     private async Task<IDisposable?> AcquireBoundSyncGateAsync(
         bool shouldAcquire,
@@ -37,9 +39,38 @@ public sealed class DrawerService
     }
 
     public DrawerService(AppPaths paths, DrawerRepository repository)
+        : this(paths, repository, recycleBinService: null)
+    {
+    }
+
+    public DrawerService(
+        AppPaths paths,
+        DrawerRepository repository,
+        RecycleBinService? recycleBinService)
     {
         _paths = paths;
         _repository = repository;
+        _recycleBinService = recycleBinService;
+    }
+
+    /// <summary>
+    /// 回收站。删除应用自己管理的文件时统一走这里，先移入回收站再等用户清理。
+    /// 懒加载并加锁，保证两个参数的旧调用点无需改动，同时并发删除只会有一个实例。
+    /// </summary>
+    public RecycleBinService RecycleBin
+    {
+        get
+        {
+            if (_recycleBinService is not null)
+            {
+                return _recycleBinService;
+            }
+
+            lock (_recycleBinGate)
+            {
+                return _recycleBinService ??= new RecycleBinService(_paths, _repository);
+            }
+        }
     }
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
@@ -47,6 +78,7 @@ public sealed class DrawerService
         _paths.EnsureCreated();
         await _repository.InitializeAsync(cancellationToken);
         await RepairStoredPathsAsync(cancellationToken);
+        await RepairRecycleEntryPathsAsync(cancellationToken);
         await EnsureDefaultBoxesAsync(cancellationToken);
     }
 
@@ -869,9 +901,18 @@ public sealed class DrawerService
         var sourceBox = await _repository.GetBoxAsync(item.BoxId, cancellationToken)
             ?? throw new InvalidOperationException("Source box does not exist.");
 
-        if (sourceBox.Type is BoxType.Normal or BoxType.Mapping)
+        // 映射盒只保存链接：删除仅移除引用，源文件保持原样。
+        if (sourceBox.Type == BoxType.Mapping)
         {
-            return await PermanentlyDeleteItemAsync(item, sourceBox, cancellationToken);
+            await _repository.RemoveItemAsync(itemId, cancellationToken);
+            return ItemDeleteResult.ReferenceRemoved(item.Id, item.DisplayName);
+        }
+
+        // 普通盒、像素盒、抽屉盒都由 PODO 托管文件：删除等于把文件从盒子里拿走，
+        // 但先移入回收站保留 30 天，还原时放回同一个盒子。
+        if (sourceBox.Type is BoxType.Normal or BoxType.Pixel or BoxType.Drawer)
+        {
+            return await DeleteStoredItemAsync(item, sourceBox, cancellationToken);
         }
 
         if (string.IsNullOrWhiteSpace(item.StoredPath))
@@ -883,6 +924,20 @@ public sealed class DrawerService
         using var boundSyncGate = await AcquireBoundSyncGateAsync(
             sourceBox.Type == BoxType.Bound,
             cancellationToken);
+
+        // 目标收纳盒与硬盘文件夹双向同步：删除会真实移除绑定文件夹里的文件，
+        // 但仍先移入 PODO 回收站保留 30 天，还原时放回同一文件夹。
+        if (sourceBox.Type == BoxType.Bound)
+        {
+            var storedPath = PathSafety.GetFullExistingPath(item.StoredPath);
+            EnsureStoredItemPathBelongsToBox(sourceBox, storedPath);
+            var isDirectory = Directory.Exists(storedPath);
+            return await RecycleItemAsync(item, sourceBox, storedPath, isDirectory, cancellationToken);
+        }
+
+        // 便签盒、待办盒、项目盒和项目文件夹盒不接受文件拖入（见 ImportPathAsync），
+        // 所以走到这里的条目一定没有 StoredPath：删除只是删掉条目行。
+        // 真出现了带 StoredPath 的历史数据，仍按“移回原位置”兜底，避免悄悄销毁用户文件。
         var restore = await RestoreStoredItemAsync(item, sourceBox, reservedTargets: null, cancellationToken);
         try
         {
@@ -903,36 +958,56 @@ public sealed class DrawerService
         return restore;
     }
 
-    private async Task<ItemDeleteResult> PermanentlyDeleteItemAsync(
+    private async Task<ItemDeleteResult> DeleteStoredItemAsync(
         DrawerItem item,
         Box sourceBox,
         CancellationToken cancellationToken)
     {
-        var path = !string.IsNullOrWhiteSpace(item.StoredPath)
-            ? PathSafety.GetFullExistingPath(item.StoredPath)
-            : !string.IsNullOrWhiteSpace(item.SourcePath)
-                ? PathSafety.GetFullExistingPath(item.SourcePath)
-                : throw new InvalidOperationException("Item has no file path.");
-
-        if (!string.IsNullOrWhiteSpace(item.StoredPath))
+        if (string.IsNullOrWhiteSpace(item.StoredPath))
         {
-            EnsureStoredItemPathBelongsToBox(sourceBox, path);
+            // 普通盒、像素盒、抽屉盒导入时都会把文件移入自己的存储目录，正常情况下这里都有 StoredPath。
+            // 万一没有，说明 PODO 并没有托管这个文件，只移除引用，不动用户磁盘上的文件。
+            await _repository.RemoveItemAsync(item.Id, CancellationToken.None);
+            return ItemDeleteResult.ReferenceRemoved(item.Id, item.DisplayName);
         }
+
+        var path = PathSafety.GetFullExistingPath(item.StoredPath);
+        EnsureStoredItemPathBelongsToBox(sourceBox, path);
 
         PathSafety.EnsureNoReparsePoints(path);
         var isDirectory = Directory.Exists(path);
-        await SafeFileOps.DeleteAsync(path, isDirectory, cancellationToken);
-        if (File.Exists(path) || Directory.Exists(path))
-        {
-            throw new IOException($"无法删除文件：{path}");
-        }
 
-        await _repository.RemoveItemAsync(item.Id, CancellationToken.None);
-        return ItemDeleteResult.PermanentlyDeletedItem(
+        // 应用自己的文件：移入回收站而不是直接物理删除。
+        return await RecycleItemAsync(item, sourceBox, path, isDirectory, cancellationToken);
+    }
+
+    private async Task<ItemDeleteResult> RecycleItemAsync(
+        DrawerItem item,
+        Box sourceBox,
+        string storedPath,
+        bool isDirectory,
+        CancellationToken cancellationToken)
+    {
+        var entry = await RecycleBin.RecycleAsync(
+            new RecycleRequest(
+                SourcePath: storedPath,
+                DisplayName: item.DisplayName,
+                OriginalPath: storedPath,
+                BoxId: sourceBox.Id,
+                BoxName: sourceBox.Name,
+                BoxType: sourceBox.Type,
+                SourceItemId: item.Id,
+                IsDirectory: isDirectory),
+            cancellationToken);
+
+        // 条目行保留并标记为已回收，这样还原时能把它带回原盒。
+        await _repository.UpdateItemRecycleStateAsync(item.Id, entry.Id.ToString(), CancellationToken.None);
+        return ItemDeleteResult.RecycledItem(
             item.Id,
             item.DisplayName,
-            wasStoredItem: !string.IsNullOrWhiteSpace(item.StoredPath),
-            deletedPath: path);
+            wasStoredItem: true,
+            recyclePath: entry.RecyclePath,
+            recycleEntryId: entry.Id);
     }
 
     public async Task<BoxDeleteResult> DeleteBoxAsync(Guid boxId, CancellationToken cancellationToken = default)
@@ -1678,6 +1753,7 @@ public sealed class DrawerService
             return items
                 .Where(item => !boundBoxIds.Contains(item.BoxId))
                 .Where(item => !unavailableManagedBoxIds.Contains(item.BoxId))
+                .Where(item => !item.IsRecycled)
                 .Where(item => mappingBoxIds.Contains(item.BoxId)
                     ? IsMissingMappingReference(item)
                     : IsMissingStoredItem(item))
@@ -1759,6 +1835,92 @@ public sealed class DrawerService
                     cancellationToken);
             }
         }
+    }
+
+    /// <summary>
+    /// 数据目录整体迁移后，回收记录里的绝对路径仍指向旧的根目录。
+    /// 迁移会整根复制，<c>Recycle\{记录Id}\</c> 与 <c>Boxes\{盒Id}\</c> 之后的
+    /// 段在迁移前后是稳定的，因此只重写根目录部分，并把改不动的记录原样留下。
+    /// </summary>
+    private async Task RepairRecycleEntryPathsAsync(CancellationToken cancellationToken)
+    {
+        var entries = await _repository.GetRecycleEntriesAsync(cancellationToken);
+        if (entries.Count == 0)
+        {
+            return;
+        }
+
+        var recycleRoot = Path.GetFullPath(_paths.RecycleDirectory);
+        var boxesRoot = Path.GetFullPath(_paths.BoxesDirectory);
+
+        foreach (var entry in entries)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var repairedRecyclePath = RepointAbsolutePath(
+                entry.RecyclePath,
+                recycleRoot,
+                AppPaths.RecycleDirectoryName);
+            if (repairedRecyclePath is null
+                || (!File.Exists(repairedRecyclePath) && !Directory.Exists(repairedRecyclePath)))
+            {
+                // 新位置没有对应文件：保持原样，交给还原逻辑按“记录丢失”处理。
+                continue;
+            }
+
+            var repairedOriginalPath = RepointAbsolutePath(
+                entry.OriginalPath,
+                boxesRoot,
+                AppPaths.BoxesDirectoryName);
+            if (repairedOriginalPath is not null
+                && !File.Exists(repairedOriginalPath)
+                && !Directory.Exists(repairedOriginalPath))
+            {
+                repairedOriginalPath = null;
+            }
+
+            await _repository.UpdateRecycleEntryPathsAsync(
+                entry.Id,
+                repairedRecyclePath,
+                repairedOriginalPath ?? entry.OriginalPath,
+                cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// 把绝对路径改写到新根目录下。已经位于新根目录之内、或找不到
+    /// <paramref name="rootSegmentName"/> 段时返回 null 表示无需/无法改写。
+    /// </summary>
+    private static string? RepointAbsolutePath(
+        string? storedPath,
+        string newRoot,
+        string rootSegmentName)
+    {
+        if (string.IsNullOrWhiteSpace(storedPath))
+        {
+            return null;
+        }
+
+        var fullPath = Path.GetFullPath(storedPath);
+        var newPrefix = newRoot + Path.DirectorySeparatorChar;
+        if (fullPath.StartsWith(newPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var segments = fullPath.Split(
+            [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+            StringSplitOptions.RemoveEmptyEntries);
+        var rootIndex = Array.FindIndex(
+            segments,
+            segment => string.Equals(segment, rootSegmentName, StringComparison.OrdinalIgnoreCase));
+        if (rootIndex < 0 || rootIndex == segments.Length - 1)
+        {
+            return null;
+        }
+
+        return Path.Combine(
+            new[] { newRoot }.Concat(segments.Skip(rootIndex + 1)).ToArray());
     }
 
     private async Task EnsureDefaultBoxesAsync(CancellationToken cancellationToken)

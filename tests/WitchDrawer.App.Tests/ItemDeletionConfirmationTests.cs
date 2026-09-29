@@ -64,6 +64,106 @@ public sealed class ItemDeletionConfirmationTests
 
     [Theory]
     [InlineData(BoxType.Normal)]
+    [InlineData(BoxType.Pixel)]
+    [InlineData(BoxType.Drawer)]
+    [InlineData(BoxType.Mapping)]
+    public async Task DeleteItemCommand_RequiresConfirmationBeforeRemovingAnything(BoxType boxType)
+    {
+        var root = Path.Combine(Path.GetTempPath(), "WitchDrawerTests", Guid.NewGuid().ToString("N"));
+        try
+        {
+            var paths = new AppPaths(root);
+            var repository = new DrawerRepository(paths.DatabasePath);
+            var drawerService = new DrawerService(paths, repository);
+            await drawerService.InitializeAsync();
+            var box = await drawerService.CreateBoxAsync("确认门", boxType);
+            var source = Path.Combine(root, "source", "keep.txt");
+            Directory.CreateDirectory(Path.GetDirectoryName(source)!);
+            File.WriteAllText(source, "keep");
+            var item = await drawerService.ImportPathAsync(box.Id, source);
+            var effectivePath = item.EffectivePath!;
+            var confirmationCalls = 0;
+
+            var viewModel = new DesktopBoxViewModel(
+                box,
+                drawerService,
+                new TodoService(repository),
+                new NoOpFileLauncher(),
+                new NoOpLogger(),
+                BoxVisualStyle.Modern,
+                confirmItemDeletion: _ =>
+                {
+                    confirmationCalls++;
+                    return false;
+                });
+            await viewModel.LoadAsync();
+
+            await viewModel.DeleteItemCommand.ExecuteAsync(viewModel.Items.Single());
+
+            Assert.Equal(1, confirmationCalls);
+            Assert.True(File.Exists(effectivePath));
+            Assert.NotNull(await repository.GetItemAsync(item.Id));
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task DeleteItemCommand_BoundBoxAlsoRequiresConfirmation()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "WitchDrawerTests", Guid.NewGuid().ToString("N"));
+        try
+        {
+            var paths = new AppPaths(root);
+            var repository = new DrawerRepository(paths.DatabasePath);
+            var drawerService = new DrawerService(paths, repository);
+            await drawerService.InitializeAsync();
+            var boundFolder = Path.Combine(root, "bound");
+            Directory.CreateDirectory(boundFolder);
+            var box = await drawerService.CreateBoundBoxAsync("目标收纳盒", boundFolder);
+            var source = Path.Combine(root, "source", "keep.txt");
+            Directory.CreateDirectory(Path.GetDirectoryName(source)!);
+            File.WriteAllText(source, "keep");
+            var item = await drawerService.ImportPathAsync(box.Id, source);
+            var boundFile = item.StoredPath!;
+            var confirmationCalls = 0;
+
+            var viewModel = new DesktopBoxViewModel(
+                box,
+                drawerService,
+                new TodoService(repository),
+                new NoOpFileLauncher(),
+                new NoOpLogger(),
+                BoxVisualStyle.Modern,
+                confirmItemDeletion: _ =>
+                {
+                    confirmationCalls++;
+                    return false;
+                });
+            await viewModel.LoadAsync();
+
+            await viewModel.DeleteItemCommand.ExecuteAsync(viewModel.Items.Single());
+
+            Assert.Equal(1, confirmationCalls);
+            Assert.True(File.Exists(boundFile));
+            Assert.NotNull(await repository.GetItemAsync(item.Id));
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Theory]
+    [InlineData(BoxType.Normal)]
     [InlineData(BoxType.Mapping)]
     public async Task RefreshAfterExternalDrag_RemovesItemAfterShellMovesItsPath(
         BoxType boxType)

@@ -103,7 +103,8 @@ public partial class App : Application
             }
 
             var repository = new DrawerRepository(paths.DatabasePath);
-            var drawerService = new DrawerService(paths, repository);
+            var recycleBinService = new RecycleBinService(paths, repository);
+            var drawerService = new DrawerService(paths, repository, recycleBinService);
             var launcher = new ShellFileLauncher();
             var todoService = new TodoService(repository);
             var updateService = new UpdateService(logger);
@@ -124,6 +125,23 @@ public partial class App : Application
                 drawerService,
                 quickPanelHotKeySettings);
             AppThemeManager.Apply(await LoadSavedThemeAsync(drawerService));
+
+            // 回收站过期清理不阻塞启动：放后台跑，失败只记日志。
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    var purged = await recycleBinService.PurgeExpiredAsync();
+                    if (purged > 0)
+                    {
+                        logger.Info($"Recycle bin purged {purged} expired entry(ies).");
+                    }
+                }
+                catch (Exception exception)
+                {
+                    logger.Error(exception, "Recycle bin purge failed during startup.");
+                }
+            });
 
             var paperTodoHost = new PaperTodoHost(
                 Path.Combine(paths.RootDirectory, "PaperTodo"),
@@ -462,10 +480,18 @@ public partial class App : Application
         var kind = item.Model.ItemKind == WitchDrawer.Core.Models.ItemKind.Directory
             ? "文件夹"
             : "文件";
+
+        // PODO 自己托管的文件（普通盒、像素盒、抽屉盒、目标收纳盒）会先进回收站保留 30 天；
+        // 映射盒条目没有 StoredPath，只是指向用户自己文件的链接，删除不会动磁盘。
+        // 删除确认只在这五种盒子里触发（见两个 ViewModel 的 Type 判断）：
+        // 便签盒/待办盒/项目盒不接受文件拖入，条目行本来就没有文件，删行不会丢数据，因此不弹框。
+        var isAppManagedFile = !string.IsNullOrWhiteSpace(item.Model.StoredPath);
         var result = MessageBox.Show(
-            $"确定要永久删除{kind}“{item.DisplayName}”吗？\n\n"
-            + "这会删除实际文件，操作无法撤销。",
-            "确认永久删除",
+            $"确定要删除{kind}“{item.DisplayName}”吗？\n\n"
+            + (isAppManagedFile
+                ? "这会移除收纳盒里的文件。文件会先移入回收站并保留 30 天，期间可以在主窗口的回收站里还原。"
+                : "PODO 里只保存了它的链接，删除只会移除链接，磁盘上的原文件保持不动。"),
+            isAppManagedFile ? "确认删除" : "确认移除链接",
             MessageBoxButton.YesNo,
             MessageBoxImage.Warning);
         return result == MessageBoxResult.Yes;

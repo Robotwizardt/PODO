@@ -306,6 +306,15 @@
                                     </DataTrigger>
                                 </Style.Triggers>
                             </Style>
+                            <Style x:Key="NavRecycleBinButtonStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource FooterNavButtonStyle}">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsRecyclePage}" Value="True">
+                                        <Setter Property="Background" Value="{DynamicResource AccentSoftBrush}" />
+                                        <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+                                        <Setter Property="FontWeight" Value="SemiBold" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
                         </Grid.Resources>
 
                         <Grid.RowDefinitions>
@@ -646,6 +655,38 @@
                             <Button Content="▦  周计划" Click="OnWeeklyPlanClicked"
                                     Style="{StaticResource GhostButtonStyle}" Margin="0,0,0,5"
                                     AutomationProperties.Name="周计划" />
+                            <Button Command="{Binding ShowRecycleBinCommand}"
+                                    Style="{StaticResource NavRecycleBinButtonStyle}" Margin="0,0,0,5"
+                                    AutomationProperties.Name="回收站">
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Left">
+                                    <Path Data="M 4,4 L 14,4 L 12.6,16 L 5.4,16 Z M 2.5,3 L 15.5,3 M 7.5,7 L 7.5,13 M 10.5,7 L 10.5,13"
+                                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                          StrokeThickness="1.25"
+                                          Width="14"
+                                          Height="14"
+                                          Stretch="Uniform"
+                                          VerticalAlignment="Center"
+                                          Margin="0,0,5,0" />
+                                    <TextBlock Text="回收站"
+                                               FontSize="{DynamicResource CaptionFontSize}"
+                                               FontWeight="{Binding FontWeight, RelativeSource={RelativeSource AncestorType=Button}}"
+                                               VerticalAlignment="Center" />
+                                    <Border Background="{DynamicResource AccentSoftBrush}"
+                                            CornerRadius="9"
+                                            Padding="6,0"
+                                            MinWidth="18"
+                                            Margin="6,0,0,0"
+                                            VerticalAlignment="Center"
+                                            Visibility="{Binding RecycleBinBadgeText, Converter={StaticResource NonEmptyToVisibilityConverter}}">
+                                        <TextBlock Text="{Binding RecycleBinBadgeText}"
+                                                   Foreground="{DynamicResource AccentBrush}"
+                                                   FontSize="{DynamicResource CaptionFontSize}"
+                                                   FontWeight="SemiBold"
+                                                   HorizontalAlignment="Center"
+                                                   VerticalAlignment="Center" />
+                                    </Border>
+                                </StackPanel>
+                            </Button>
                             <UniformGrid Columns="2">
                                 <Button Command="{Binding ShowProjectCommand}"
                                         Style="{StaticResource NavProjectButtonStyle}"
@@ -751,6 +792,9 @@
                                         <Setter Property="Visibility" Value="Collapsed" />
                                     </DataTrigger>
                                     <DataTrigger Binding="{Binding IsArchivePage}" Value="True">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding IsRecyclePage}" Value="True">
                                         <Setter Property="Visibility" Value="Collapsed" />
                                     </DataTrigger>
                                     <DataTrigger Binding="{Binding IsWeeklyPlanPage}" Value="True">
@@ -1933,7 +1977,7 @@
                                                        Foreground="{DynamicResource TextPrimaryBrush}"
                                                        FontSize="13.5"
                                                        FontWeight="SemiBold" />
-                                            <TextBlock Text="  ·  双击打开，按 Delete 永久删除"
+                                            <TextBlock Text="  ·  双击打开，按 Delete 删除"
                                                        Foreground="{DynamicResource TextMutedBrush}"
                                                         FontSize="{DynamicResource CaptionFontSize}"
                                                        VerticalAlignment="Center" />
@@ -3180,6 +3224,205 @@
                                 </Border>
                             </StackPanel>
                             </ScrollViewer>
+                    </Grid>
+
+                    <!-- Recycle Bin Page -->
+                    <Grid Visibility="{Binding IsRecyclePage, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+
+                        <Grid Grid.Row="0" Margin="0,0,0,7">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Text="安全网"
+                                           Foreground="{DynamicResource TextMutedBrush}"
+                                           FontSize="{DynamicResource CaptionFontSize}"
+                                           FontWeight="SemiBold" />
+                                <TextBlock Text="回收站"
+                                           Margin="0,2,0,0"
+                                           Foreground="{DynamicResource TextPrimaryBrush}"
+                                           FontSize="24"
+                                           FontWeight="SemiBold" />
+                            </StackPanel>
+                            <Button Grid.Column="1"
+                                    Content="清空回收站"
+                                    Command="{Binding RecycleBin.EmptyCommand}"
+                                    Style="{StaticResource GhostButtonStyle}"
+                                    Height="28"
+                                    Padding="12,0"
+                                    VerticalAlignment="Center"
+                                    Foreground="{DynamicResource DangerBrush}"
+                                    AutomationProperties.Name="清空回收站" />
+                        </Grid>
+
+                        <Grid Grid.Row="1">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" MinHeight="140" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+
+                            <Border Grid.Row="0" Background="{DynamicResource PanelBrush}"
+                                        BorderBrush="{DynamicResource BorderBrushSoft}"
+                                        BorderThickness="1"
+                                        CornerRadius="12"
+                                        Padding="10"
+                                        Margin="0,0,0,6">
+                                    <StackPanel>
+                                        <TextBlock Text="删除收纳盒里的文件时不会立即销毁"
+                                                   FontWeight="SemiBold"
+                                                   FontSize="13"
+                                                   Foreground="{DynamicResource TextPrimaryBrush}" />
+                                        <TextBlock Text="文件会先移入回收站并保留 30 天，期间可以随时还原；超过 30 天或手动清空后才会彻底删除。映射盒只存引用，删除时不会移动你的原文件；普通盒、像素盒、抽屉盒删除条目时文件会从盒子里拿走，目标收纳盒则同步移除绑定文件夹里的文件，两者都可以先从回收站还原。"
+                                                   Margin="0,2,0,0"
+                                                   FontSize="{DynamicResource CaptionFontSize}"
+                                                   LineHeight="15"
+                                                   TextWrapping="Wrap"
+                                                   Foreground="{DynamicResource TextMutedBrush}" />
+                                        <TextBlock Text="{Binding RecycleBin.SummaryText}"
+                                                   Margin="0,6,0,0"
+                                                   FontSize="{DynamicResource CaptionFontSize}"
+                                                   FontWeight="SemiBold"
+                                                   Foreground="{DynamicResource AccentBrush}" />
+                                    </StackPanel>
+                                </Border>
+
+                                <Border Grid.Row="1" Background="{DynamicResource PanelBrush}"
+                                        BorderBrush="{DynamicResource BorderBrushSoft}"
+                                        BorderThickness="1"
+                                        CornerRadius="12"
+                                        Padding="6"
+                                        Visibility="{Binding RecycleBin.HasEntries, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                    <ListBox ItemsSource="{Binding RecycleBin.Entries}"
+                                             Background="Transparent"
+                                             BorderThickness="0"
+                                             Padding="0"
+                                             ScrollViewer.CanContentScroll="True"
+                                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                             ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                             VirtualizingPanel.ScrollUnit="Pixel"
+                                             VirtualizingPanel.IsVirtualizing="True"
+                                             VirtualizingPanel.VirtualizationMode="Recycling">
+                                        <ListBox.Resources>
+                                            <Style TargetType="{x:Type ScrollBar}"
+                                                   BasedOn="{StaticResource DrawerScrollBarStyle}" />
+                                            <Style TargetType="{x:Type ListBoxItem}">
+                                                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                                <Setter Property="Padding" Value="6,8" />
+                                            </Style>
+                                        </ListBox.Resources>
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="Auto" />
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <Border Grid.Column="0"
+                                                            Width="30"
+                                                            Height="30"
+                                                            CornerRadius="8"
+                                                            Background="{DynamicResource PanelAltBrush}"
+                                                            VerticalAlignment="Center">
+                                                        <TextBlock Text="{Binding TypeGlyph}"
+                                                                   FontFamily="Segoe Fluent Icons"
+                                                                   FontSize="13"
+                                                                   Foreground="{DynamicResource TextMutedBrush}"
+                                                                   HorizontalAlignment="Center"
+                                                                   VerticalAlignment="Center" />
+                                                    </Border>
+                                                    <StackPanel Grid.Column="1" Margin="10,0,10,0" VerticalAlignment="Center">
+                                                        <TextBlock Text="{Binding DisplayName}"
+                                                                   Foreground="{DynamicResource TextPrimaryBrush}"
+                                                                   FontSize="13"
+                                                                   FontWeight="SemiBold"
+                                                                   TextTrimming="CharacterEllipsis" />
+                                                        <StackPanel Margin="0,3,0,0" Orientation="Horizontal">
+                                                            <TextBlock Text="{Binding BoxName}"
+                                                                       Foreground="{DynamicResource AccentBrush}"
+                                                                       FontSize="{DynamicResource CaptionFontSize}"
+                                                                       FontWeight="SemiBold" />
+                                                            <TextBlock Text="  ·  "
+                                                                       Foreground="{DynamicResource TextMutedBrush}"
+                                                                       FontSize="{DynamicResource CaptionFontSize}" />
+                                                            <TextBlock Text="{Binding KindLabel}"
+                                                                       Foreground="{DynamicResource TextMutedBrush}"
+                                                                       FontSize="{DynamicResource CaptionFontSize}" />
+                                                            <TextBlock Text="  ·  删除于 "
+                                                                       Foreground="{DynamicResource TextMutedBrush}"
+                                                                       FontSize="{DynamicResource CaptionFontSize}" />
+                                                            <TextBlock Text="{Binding DeletedAtLabel}"
+                                                                       Foreground="{DynamicResource TextMutedBrush}"
+                                                                       FontSize="{DynamicResource CaptionFontSize}" />
+                                                            <TextBlock Text="  ·  "
+                                                                       Foreground="{DynamicResource TextMutedBrush}"
+                                                                       FontSize="{DynamicResource CaptionFontSize}" />
+                                                            <TextBlock Text="{Binding RemainingDaysLabel}"
+                                                                       Foreground="{DynamicResource TextMutedBrush}"
+                                                                       FontSize="{DynamicResource CaptionFontSize}" />
+                                                        </StackPanel>
+                                                        <TextBlock Text="{Binding OriginalPath}"
+                                                                   Margin="0,2,0,0"
+                                                                   Foreground="{DynamicResource TextMutedBrush}"
+                                                                   FontSize="{DynamicResource CaptionFontSize}"
+                                                                   TextTrimming="CharacterEllipsis" />
+                                                    </StackPanel>
+                                                    <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                                                        <Button Content="还原"
+                                                                Command="{Binding RestoreCommand}"
+                                                                Style="{StaticResource GhostButtonStyle}"
+                                                                Foreground="{DynamicResource AccentBrush}"
+                                                                Margin="8,0,2,0"
+                                                                Padding="10,4" />
+                                                        <Button Content="彻底删除"
+                                                                Command="{Binding DeleteCommand}"
+                                                                Style="{StaticResource GhostButtonStyle}"
+                                                                Foreground="{DynamicResource DangerBrush}"
+                                                                Margin="2,0,0,0"
+                                                                Padding="10,4" />
+                                                    </StackPanel>
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+                                </Border>
+
+                                <Border Grid.Row="2" Background="{DynamicResource PanelBrush}"
+                                        Visibility="{Binding RecycleBin.HasEntries, Converter={StaticResource InverseBooleanToVisibilityConverter}}">
+                                    <StackPanel HorizontalAlignment="Center">
+                                        <TextBlock Text="回收站是空的"
+                                                   Foreground="{DynamicResource TextPrimaryBrush}"
+                                                   FontSize="14"
+                                                   FontWeight="SemiBold"
+                                                   HorizontalAlignment="Center" />
+                                        <TextBlock Text="删除的文件会先放在这里 30 天"
+                                                   Margin="0,4,0,0"
+                                                   Foreground="{DynamicResource TextMutedBrush}"
+                                                   FontSize="{DynamicResource CaptionFontSize}"
+                                                   HorizontalAlignment="Center" />
+                                    </StackPanel>
+                                </Border>
+
+                                <Border Grid.Row="3" Background="{DynamicResource PanelBrush}"
+                                        BorderBrush="{DynamicResource BorderBrushSoft}"
+                                        BorderThickness="1"
+                                        CornerRadius="12"
+                                        Padding="10"
+                                        Margin="0,6,0,0"
+                                        Visibility="{Binding RecycleBin.HasError, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                    <TextBlock Text="{Binding RecycleBin.ErrorText}"
+                                               Foreground="{DynamicResource DangerBrush}"
+                                               FontSize="{DynamicResource CaptionFontSize}"
+                                               TextWrapping="Wrap" />
+                                </Border>
+                        </Grid>
                     </Grid>
 
                     <!-- About Page -->

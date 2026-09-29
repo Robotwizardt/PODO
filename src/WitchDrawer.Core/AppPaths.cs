@@ -30,6 +30,11 @@ public sealed record AppPaths(string RootDirectory)
     public const string BoxesDirectoryName = "Boxes";
 
     /// <summary>
+    /// 应用内回收站根目录名。删除的文件先移动到这里，保留 30 天后自动清理。
+    /// </summary>
+    public const string RecycleDirectoryName = "Recycle";
+
+    /// <summary>
     /// 日志目录名。
     /// </summary>
     public const string LogsDirectoryName = "logs";
@@ -40,6 +45,12 @@ public sealed record AppPaths(string RootDirectory)
     private const string WritabilityProbeFileName = ".podo_write_probe";
 
     public string BoxesDirectory => Path.Combine(RootDirectory, BoxesDirectoryName);
+
+    /// <summary>
+    /// 回收站根目录。每条回收记录对应一个以记录 Id 命名的子目录，
+    /// 因此不同记录即使文件名相同也不会互相覆盖。
+    /// </summary>
+    public string RecycleDirectory => Path.Combine(RootDirectory, RecycleDirectoryName);
 
     public string DatabasePath => Path.Combine(RootDirectory, DatabaseFileName);
 
@@ -100,6 +111,7 @@ public sealed record AppPaths(string RootDirectory)
     {
         Directory.CreateDirectory(RootDirectory);
         Directory.CreateDirectory(BoxesDirectory);
+        Directory.CreateDirectory(RecycleDirectory);
         Directory.CreateDirectory(LogsDirectory);
     }
 

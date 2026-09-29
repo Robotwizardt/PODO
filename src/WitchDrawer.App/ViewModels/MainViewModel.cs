@@ -48,6 +48,7 @@ public sealed class MainViewModel : ObservableObject
     private bool _isAboutPage;
     private bool _isArchivePage;
     private bool _isWeeklyPlanPage;
+    private bool _isRecyclePage;
     private string _statusText = "准备就绪";
     private string _themeLabel = "清透雅致";
     private AppTheme _currentTheme;
@@ -101,6 +102,13 @@ public sealed class MainViewModel : ObservableObject
             };
         }
         _projectService = projectService ?? new ProjectService(todoService.Repository);
+        RecycleBin = new RecycleBinViewModel(
+            drawerService.RecycleBin,
+            logger,
+            confirmItemDeletion: ConfirmRecycleBinDeletion,
+            confirmEmptyAll: ConfirmRecycleBinEmpty);
+        RecycleBin.ItemsChanged += OnRecycleBinItemsChanged;
+        RecycleBin.EntriesChanged += OnRecycleBinEntriesChanged;
         TodoBoxDetail = new TodoBoxDetailViewModel(todoService, logger);
         TodoBoxDetail.ItemsChanged += OnTodoBoxDetailItemsChanged;
         ProjectManagement = new ProjectManagementViewModel(_projectService, logger);
@@ -157,6 +165,7 @@ public sealed class MainViewModel : ObservableObject
             IsArchivePage = false;
             IsSettingsPage = false;
             IsAboutPage = false;
+            IsRecyclePage = false;
         });
         ShowProjectCommand = new AsyncRelayCommand(ShowProjectAsync);
         ShowArchiveCommand = new AsyncRelayCommand(ShowArchiveAsync);
@@ -167,6 +176,7 @@ public sealed class MainViewModel : ObservableObject
             IsArchivePage = false;
             IsSettingsPage = true;
             IsAboutPage = false;
+            IsRecyclePage = false;
         });
         ShowAboutCommand = new RelayCommand(() =>
         {
@@ -174,7 +184,9 @@ public sealed class MainViewModel : ObservableObject
             IsArchivePage = false;
             IsSettingsPage = false;
             IsAboutPage = true;
+            IsRecyclePage = false;
         });
+        ShowRecycleBinCommand = new RelayCommand(ShowRecycleBin);
     }
 
     public event EventHandler? BoxesChanged;
@@ -277,12 +289,19 @@ public sealed class MainViewModel : ObservableObject
 
     public IRelayCommand ShowAboutCommand { get; }
 
+    public IRelayCommand ShowRecycleBinCommand { get; }
+
     public BoxViewModel? SelectedBox
     {
         get => _selectedBox;
         set
         {
-            if (value is not null) IsWeeklyPlanPage = false;
+            if (value is not null)
+            {
+                IsWeeklyPlanPage = false;
+                IsRecyclePage = false;
+            }
+
             if (UpdateSelectedBoxCore(value))
             {
                 QueueSelectedBoxItemsLoad();
@@ -313,20 +332,53 @@ public sealed class MainViewModel : ObservableObject
     public bool IsSettingsPage
     {
         get => _isSettingsPage;
-        set { if (value) IsWeeklyPlanPage = false; SetProperty(ref _isSettingsPage, value); }
+        set { if (value) IsRecyclePage = false; IsWeeklyPlanPage = false; SetProperty(ref _isSettingsPage, value); }
     }
 
     public bool IsAboutPage
     {
         get => _isAboutPage;
-        set { if (value) IsWeeklyPlanPage = false; SetProperty(ref _isAboutPage, value); }
+        set { if (value) IsRecyclePage = false; IsWeeklyPlanPage = false; SetProperty(ref _isAboutPage, value); }
     }
 
     public bool IsArchivePage
     {
         get => _isArchivePage;
-        set { if (value) IsWeeklyPlanPage = false; SetProperty(ref _isArchivePage, value); }
+        set { if (value) IsRecyclePage = false; IsWeeklyPlanPage = false; SetProperty(ref _isArchivePage, value); }
     }
+
+    public bool IsRecyclePage
+    {
+        get => _isRecyclePage;
+        set
+        {
+            if (value && !_isRecyclePage)
+            {
+                // 打开回收站页时重新拉一次列表，角标与列表保持同步。
+                _ = RefreshRecycleBinAsync();
+            }
+
+            if (value)
+            {
+                IsWeeklyPlanPage = false;
+                _isSettingsPage = false;
+                _isAboutPage = false;
+                _isArchivePage = false;
+                OnPropertyChanged(nameof(IsSettingsPage));
+                OnPropertyChanged(nameof(IsAboutPage));
+                OnPropertyChanged(nameof(IsArchivePage));
+            }
+
+            SetProperty(ref _isRecyclePage, value);
+        }
+    }
+
+    public RecycleBinViewModel RecycleBin { get; }
+
+    public int RecycleBinEntryCount => RecycleBin.Entries.Count;
+
+    public string RecycleBinBadgeText =>
+        RecycleBin.Entries.Count == 0 ? string.Empty : RecycleBin.Entries.Count.ToString();
 
     public bool IsWeeklyPlanPage
     {
@@ -337,8 +389,63 @@ public sealed class MainViewModel : ObservableObject
     public void ShowWeeklyPlan()
     {
         SelectedBox = null;
-        IsSettingsPage = IsAboutPage = IsArchivePage = false;
+        IsSettingsPage = IsAboutPage = IsArchivePage = IsRecyclePage = false;
         IsWeeklyPlanPage = true;
+    }
+
+    private void ShowRecycleBin()
+    {
+        SelectedBox = null;
+        IsWeeklyPlanPage = false;
+        IsArchivePage = false;
+        IsSettingsPage = false;
+        IsAboutPage = false;
+        IsRecyclePage = true;
+    }
+
+    private async Task RefreshRecycleBinAsync()
+    {
+        await RecycleBin.RefreshAsync();
+        OnPropertyChanged(nameof(RecycleBinEntryCount));
+        OnPropertyChanged(nameof(RecycleBinBadgeText));
+    }
+
+    private void OnRecycleBinItemsChanged(object? sender, Guid? boxId)
+    {
+        OnPropertyChanged(nameof(RecycleBinEntryCount));
+        OnPropertyChanged(nameof(RecycleBinBadgeText));
+        if (boxId is Guid restoredBoxId)
+        {
+            ItemsChanged?.Invoke(this, new BoxItemsChangedEventArgs(restoredBoxId));
+        }
+    }
+
+    private void OnRecycleBinEntriesChanged(object? sender, EventArgs args)
+    {
+        // 手动还原/彻底删除/清空后也要刷新侧边栏角标。
+        OnPropertyChanged(nameof(RecycleBinEntryCount));
+        OnPropertyChanged(nameof(RecycleBinBadgeText));
+    }
+
+    private static bool ConfirmRecycleBinDeletion(RecycleBinEntryViewModel entry)
+    {
+        var result = System.Windows.MessageBox.Show(
+            $"确定要彻底删除{entry.KindLabel}“{entry.DisplayName}”吗？\n\n"
+            + "这会删除回收站里的实际文件，操作无法撤销。",
+            "确认彻底删除",
+            System.Windows.MessageBoxButton.YesNo,
+            System.Windows.MessageBoxImage.Warning);
+        return result == System.Windows.MessageBoxResult.Yes;
+    }
+
+    private static bool ConfirmRecycleBinEmpty()
+    {
+        var result = System.Windows.MessageBox.Show(
+            "确定要清空回收站吗？\n\n回收站里的所有文件都会被彻底删除，操作无法撤销。",
+            "确认清空回收站",
+            System.Windows.MessageBoxButton.YesNo,
+            System.Windows.MessageBoxImage.Warning);
+        return result == System.Windows.MessageBoxResult.Yes;
     }
 
     internal WeeklyPlanService CreateWeeklyPlanService(PaperTodoHost host) => new(host,
@@ -1151,7 +1258,7 @@ public sealed class MainViewModel : ObservableObject
             return;
         }
 
-        if ((SelectedBox?.Type is BoxType.Normal or BoxType.Mapping)
+        if ((SelectedBox?.Type is BoxType.Normal or BoxType.Pixel or BoxType.Drawer or BoxType.Mapping or BoxType.Bound)
             && !_confirmItemDeletion(item))
         {
             return;
@@ -1162,6 +1269,11 @@ public sealed class MainViewModel : ObservableObject
             var result = await _drawerService.DeleteItemAsync(item.Id);
             await LoadItemsForSelectedBoxAsync(SelectedBox);
             await _quickPanelViewModel.RefreshBoxAsync(item.Model.BoxId);
+            if (result.Recycled)
+            {
+                await RefreshRecycleBinAsync();
+            }
+
             StatusText = result.StatusMessage;
             ItemsChanged?.Invoke(this, new BoxItemsChangedEventArgs(item.Model.BoxId));
         });

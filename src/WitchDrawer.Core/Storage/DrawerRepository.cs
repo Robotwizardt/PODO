@@ -60,6 +60,21 @@ public sealed class DrawerRepository
                     FOREIGN KEY(BoxId) REFERENCES Boxes(Id) ON DELETE CASCADE
                 );
 
+                CREATE TABLE IF NOT EXISTS RecycleEntries (
+                    Id TEXT PRIMARY KEY,
+                    DisplayName TEXT NOT NULL,
+                    RecyclePath TEXT NOT NULL,
+                    OriginalPath TEXT NULL,
+                    BoxId TEXT NULL,
+                    BoxName TEXT NOT NULL,
+                    BoxType INTEGER NOT NULL,
+                    SourceItemId TEXT NULL,
+                    WasDirectory INTEGER NOT NULL DEFAULT 0,
+                    SizeBytes INTEGER NOT NULL DEFAULT 0,
+                    DeletedAtUtc TEXT NOT NULL,
+                    ExpiresAtUtc TEXT NOT NULL
+                );
+
                 CREATE TABLE IF NOT EXISTS AppSettings (
                     Key TEXT PRIMARY KEY,
                     Value TEXT NOT NULL
@@ -171,6 +186,7 @@ public sealed class DrawerRepository
 
             await EnsureColumnAsync(connection, "Items", "GridColumn", "INTEGER NULL", cancellationToken);
             await EnsureColumnAsync(connection, "Items", "GridRow", "INTEGER NULL", cancellationToken);
+            await EnsureColumnAsync(connection, "Items", "RecycleEntryId", "TEXT NULL", cancellationToken);
             await EnsureColumnAsync(connection, "Boxes", "IsArchived", "INTEGER NOT NULL DEFAULT 0", cancellationToken);
             await EnsureColumnAsync(connection, "Boxes", "ArchivedAt", "TEXT NULL", cancellationToken);
             await EnsureColumnAsync(connection, "Todos", "BoxId", "TEXT NULL", cancellationToken);
@@ -214,7 +230,11 @@ public sealed class DrawerRepository
                 cancellationToken);
             await ExecuteNonQueryAsync(
                 connection,
-                "CREATE INDEX IF NOT EXISTS IX_Todos_BoxArchiveStateSort ON Todos(BoxId, IsArchived, IsCompleted, SortOrder);",
+                "CREATE INDEX IF NOT EXISTS IX_RecycleEntries_ExpiresAtUtc ON RecycleEntries(ExpiresAtUtc);",
+                cancellationToken);
+            await ExecuteNonQueryAsync(
+                connection,
+                "CREATE INDEX IF NOT EXISTS IX_Items_RecycleEntryId ON Items(RecycleEntryId);",
                 cancellationToken);
         }
         catch (Exception exception) when (IsDatabaseAccessFailure(exception))
@@ -548,10 +568,12 @@ public sealed class DrawerRepository
             command.CommandText =
                 """
                 SELECT items.Id, items.BoxId, items.DisplayName, items.ItemKind, items.SourcePath, items.StoredPath,
-                       items.SortOrder, items.CreatedAt, items.UpdatedAt, items.GridColumn, items.GridRow
+                       items.SortOrder, items.CreatedAt, items.UpdatedAt, items.GridColumn, items.GridRow,
+                       items.RecycleEntryId
                 FROM Items AS items
                 INNER JOIN Boxes AS boxes ON boxes.Id = items.BoxId
                 WHERE boxes.IsArchived = 0
+                  AND items.RecycleEntryId IS NULL
                 ORDER BY COALESCE(items.GridRow, 1000000), COALESCE(items.GridColumn, 1000000),
                          items.SortOrder, items.DisplayName;
                 """;
@@ -560,9 +582,10 @@ public sealed class DrawerRepository
         {
             command.CommandText =
                 """
-                SELECT Id, BoxId, DisplayName, ItemKind, SourcePath, StoredPath, SortOrder, CreatedAt, UpdatedAt, GridColumn, GridRow
+                SELECT Id, BoxId, DisplayName, ItemKind, SourcePath, StoredPath, SortOrder, CreatedAt, UpdatedAt, GridColumn, GridRow, RecycleEntryId
                 FROM Items
                 WHERE BoxId = $boxId
+                  AND RecycleEntryId IS NULL
                 ORDER BY COALESCE(GridRow, 1000000), COALESCE(GridColumn, 1000000), SortOrder, DisplayName;
                 """;
             command.Parameters.AddWithValue("$boxId", boxId.Value.ToString());
@@ -587,10 +610,12 @@ public sealed class DrawerRepository
         command.CommandText =
             """
             SELECT items.Id, items.BoxId, items.DisplayName, items.ItemKind, items.SourcePath, items.StoredPath,
-                   items.SortOrder, items.CreatedAt, items.UpdatedAt, items.GridColumn, items.GridRow
+                   items.SortOrder, items.CreatedAt, items.UpdatedAt, items.GridColumn, items.GridRow,
+                   items.RecycleEntryId
             FROM Items AS items
             INNER JOIN Boxes AS boxes ON boxes.Id = items.BoxId
             WHERE boxes.IsArchived = 0
+              AND items.RecycleEntryId IS NULL
               AND ($query = '' OR items.DisplayName LIKE $like OR items.SourcePath LIKE $like OR items.StoredPath LIKE $like)
             ORDER BY COALESCE(items.GridRow, 1000000), COALESCE(items.GridColumn, 1000000),
                      items.SortOrder, items.DisplayName
@@ -618,7 +643,7 @@ public sealed class DrawerRepository
         var command = connection.CreateCommand();
         command.CommandText =
             """
-            SELECT Id, BoxId, DisplayName, ItemKind, SourcePath, StoredPath, SortOrder, CreatedAt, UpdatedAt, GridColumn, GridRow
+            SELECT Id, BoxId, DisplayName, ItemKind, SourcePath, StoredPath, SortOrder, CreatedAt, UpdatedAt, GridColumn, GridRow, RecycleEntryId
             FROM Items
             WHERE Id = $id;
             """;
@@ -636,8 +661,8 @@ public sealed class DrawerRepository
         var command = connection.CreateCommand();
         command.CommandText =
             """
-            INSERT INTO Items (Id, BoxId, DisplayName, ItemKind, SourcePath, StoredPath, SortOrder, GridColumn, GridRow, CreatedAt, UpdatedAt)
-            VALUES ($id, $boxId, $displayName, $itemKind, $sourcePath, $storedPath, $sortOrder, $gridColumn, $gridRow, $createdAt, $updatedAt);
+            INSERT INTO Items (Id, BoxId, DisplayName, ItemKind, SourcePath, StoredPath, SortOrder, GridColumn, GridRow, CreatedAt, UpdatedAt, RecycleEntryId)
+            VALUES ($id, $boxId, $displayName, $itemKind, $sourcePath, $storedPath, $sortOrder, $gridColumn, $gridRow, $createdAt, $updatedAt, $recycleEntryId);
             """;
         command.Parameters.AddWithValue("$id", item.Id.ToString());
         command.Parameters.AddWithValue("$boxId", item.BoxId.ToString());
@@ -650,6 +675,7 @@ public sealed class DrawerRepository
         command.Parameters.AddWithValue("$gridRow", (object?)item.GridRow ?? DBNull.Value);
         command.Parameters.AddWithValue("$createdAt", ToDb(item.CreatedAt));
         command.Parameters.AddWithValue("$updatedAt", ToDb(item.UpdatedAt));
+        command.Parameters.AddWithValue("$recycleEntryId", (object?)item.RecycleEntryId ?? DBNull.Value);
 
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
@@ -676,6 +702,35 @@ public sealed class DrawerRepository
         if (await command.ExecuteNonQueryAsync(cancellationToken) != 1)
         {
             throw new InvalidOperationException("Item does not exist.");
+        }
+    }
+
+    /// <summary>
+    /// 数据目录迁移后把回收记录的绝对路径改写到新的回收站根目录下。
+    /// </summary>
+    public async Task UpdateRecycleEntryPathsAsync(
+        Guid entryId,
+        string recyclePath,
+        string? originalPath,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        var command = connection.CreateCommand();
+        command.CommandText =
+            """
+            UPDATE RecycleEntries
+            SET RecyclePath = $recyclePath, OriginalPath = $originalPath
+            WHERE Id = $id;
+            """;
+        command.Parameters.AddWithValue("$id", entryId.ToString());
+        command.Parameters.AddWithValue("$recyclePath", recyclePath);
+        command.Parameters.AddWithValue("$originalPath", (object?)originalPath ?? DBNull.Value);
+
+        if (await command.ExecuteNonQueryAsync(cancellationToken) != 1)
+        {
+            throw new InvalidOperationException("Recycle entry does not exist.");
         }
     }
 
@@ -798,6 +853,170 @@ public sealed class DrawerRepository
         {
             throw new InvalidOperationException("Item does not exist.");
         }
+    }
+
+    /// <summary>
+    /// 把条目标记为已回收（或清空标记）。条目行本身保留，
+    /// 这样还原时可以完整恢复网格位置、排序与来源信息。
+    /// </summary>
+    public async Task UpdateItemRecycleStateAsync(
+        Guid itemId,
+        string? recycleEntryId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        var command = connection.CreateCommand();
+        command.CommandText =
+            """
+            UPDATE Items
+            SET RecycleEntryId = $recycleEntryId, UpdatedAt = $updatedAt
+            WHERE Id = $id;
+            """;
+        command.Parameters.AddWithValue("$id", itemId.ToString());
+        command.Parameters.AddWithValue("$recycleEntryId", (object?)recycleEntryId ?? DBNull.Value);
+        command.Parameters.AddWithValue("$updatedAt", ToDb(DateTimeOffset.UtcNow));
+
+        if (await command.ExecuteNonQueryAsync(cancellationToken) != 1)
+        {
+            throw new InvalidOperationException("Item does not exist.");
+        }
+    }
+
+    public async Task AddRecycleEntryAsync(
+        RecycleEntry entry,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        var command = connection.CreateCommand();
+        command.CommandText =
+            """
+            INSERT INTO RecycleEntries (Id, DisplayName, RecyclePath, OriginalPath, BoxId, BoxName,
+                                        BoxType, SourceItemId, WasDirectory, SizeBytes, DeletedAtUtc, ExpiresAtUtc)
+            VALUES ($id, $displayName, $recyclePath, $originalPath, $boxId, $boxName,
+                    $boxType, $sourceItemId, $wasDirectory, $sizeBytes, $deletedAtUtc, $expiresAtUtc);
+            """;
+        command.Parameters.AddWithValue("$id", entry.Id.ToString());
+        command.Parameters.AddWithValue("$displayName", entry.DisplayName);
+        command.Parameters.AddWithValue("$recyclePath", entry.RecyclePath);
+        command.Parameters.AddWithValue("$originalPath", (object?)entry.OriginalPath ?? DBNull.Value);
+        command.Parameters.AddWithValue("$boxId", entry.BoxId is Guid boxId ? boxId.ToString() : DBNull.Value);
+        command.Parameters.AddWithValue("$boxName", entry.BoxName);
+        command.Parameters.AddWithValue("$boxType", (int)entry.BoxType);
+        command.Parameters.AddWithValue(
+            "$sourceItemId",
+            entry.SourceItemId is Guid sourceItemId ? sourceItemId.ToString() : DBNull.Value);
+        command.Parameters.AddWithValue("$wasDirectory", entry.WasDirectory ? 1 : 0);
+        command.Parameters.AddWithValue("$sizeBytes", entry.SizeBytes);
+        command.Parameters.AddWithValue("$deletedAtUtc", ToDb(entry.DeletedAtUtc));
+        command.Parameters.AddWithValue("$expiresAtUtc", ToDb(entry.ExpiresAtUtc));
+
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<RecycleEntry>> GetRecycleEntriesAsync(
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        var command = connection.CreateCommand();
+        command.CommandText =
+            """
+            SELECT Id, DisplayName, RecyclePath, OriginalPath, BoxId, BoxName,
+                   BoxType, SourceItemId, WasDirectory, SizeBytes, DeletedAtUtc, ExpiresAtUtc
+            FROM RecycleEntries
+            ORDER BY DeletedAtUtc DESC, DisplayName;
+            """;
+
+        var entries = new List<RecycleEntry>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            entries.Add(ReadRecycleEntry(reader));
+        }
+
+        return entries;
+    }
+
+    public async Task<RecycleEntry?> GetRecycleEntryAsync(
+        Guid entryId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        var command = connection.CreateCommand();
+        command.CommandText =
+            """
+            SELECT Id, DisplayName, RecyclePath, OriginalPath, BoxId, BoxName,
+                   BoxType, SourceItemId, WasDirectory, SizeBytes, DeletedAtUtc, ExpiresAtUtc
+            FROM RecycleEntries
+            WHERE Id = $id;
+            """;
+        command.Parameters.AddWithValue("$id", entryId.ToString());
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        return await reader.ReadAsync(cancellationToken) ? ReadRecycleEntry(reader) : null;
+    }
+
+    public async Task<IReadOnlyList<RecycleEntry>> GetExpiredRecycleEntriesAsync(
+        DateTimeOffset nowUtc,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        var command = connection.CreateCommand();
+        command.CommandText =
+            """
+            SELECT Id, DisplayName, RecyclePath, OriginalPath, BoxId, BoxName,
+                   BoxType, SourceItemId, WasDirectory, SizeBytes, DeletedAtUtc, ExpiresAtUtc
+            FROM RecycleEntries
+            WHERE ExpiresAtUtc <= $nowUtc;
+            """;
+        command.Parameters.AddWithValue("$nowUtc", ToDb(nowUtc));
+
+        var entries = new List<RecycleEntry>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            entries.Add(ReadRecycleEntry(reader));
+        }
+
+        return entries;
+    }
+
+    public async Task RemoveRecycleEntryAsync(Guid entryId, CancellationToken cancellationToken = default)
+    {
+        await using var connection = CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        var command = connection.CreateCommand();
+        command.CommandText = "DELETE FROM RecycleEntries WHERE Id = $id;";
+        command.Parameters.AddWithValue("$id", entryId.ToString());
+
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static RecycleEntry ReadRecycleEntry(SqliteDataReader reader)
+    {
+        return new RecycleEntry(
+            Guid.Parse(reader.GetString(0)),
+            reader.GetString(1),
+            reader.GetString(2),
+            reader.IsDBNull(3) ? null : reader.GetString(3),
+            reader.IsDBNull(4) ? null : Guid.Parse(reader.GetString(4)),
+            reader.GetString(5),
+            (BoxType)reader.GetInt32(6),
+            reader.IsDBNull(7) ? null : Guid.Parse(reader.GetString(7)),
+            reader.GetInt32(8) != 0,
+            reader.GetInt64(9),
+            FromDb(reader.GetString(10)),
+            FromDb(reader.GetString(11)));
     }
 
     public async Task<IReadOnlyList<TodoItem>> GetTodosAsync(
@@ -1987,7 +2206,8 @@ public sealed class DrawerRepository
             FromDb(reader.GetString(7)),
             FromDb(reader.GetString(8)),
             reader.IsDBNull(9) ? null : reader.GetInt32(9),
-            reader.IsDBNull(10) ? null : reader.GetInt32(10));
+            reader.IsDBNull(10) ? null : reader.GetInt32(10),
+            reader.IsDBNull(11) ? null : reader.GetString(11));
     }
 
     private static TodoItem ReadTodo(SqliteDataReader reader)

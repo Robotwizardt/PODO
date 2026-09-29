@@ -514,7 +514,7 @@ public sealed class DrawerServiceTests
     }
 
     [Fact]
-    public async Task DeleteItemAsync_NormalBoxPermanentlyDeletesStoredFileAndRemovesItem()
+    public async Task DeleteItemAsync_NormalBoxMovesStoredFileToRecycleBinAndKeepsItem()
     {
         using var workspace = await TestWorkspace.CreateAsync();
         var source = workspace.CreateSourceFile("source-a", "delete-me.txt", "hello");
@@ -524,16 +524,22 @@ public sealed class DrawerServiceTests
 
         var result = await workspace.Service.DeleteItemAsync(item.Id);
         var remainingItems = await workspace.Repository.GetItemsAsync(normalBox.Id);
+        var trackedItem = await workspace.Repository.GetItemAsync(item.Id);
+        var recycleEntries = await workspace.Service.RecycleBin.GetEntriesAsync();
 
         Assert.True(result.WasStoredItem);
-        Assert.True(result.PermanentlyDeleted);
-        Assert.Equal(storedPath, result.DeletedPath);
-        Assert.False(result.RestoredToOriginal);
-        Assert.False(result.RestoredToDesktop);
+        Assert.True(result.Recycled);
+        Assert.False(result.PermanentlyDeleted);
+        Assert.NotNull(result.RecycleEntryId);
+        Assert.NotNull(result.RecyclePath);
         Assert.False(File.Exists(source));
         Assert.False(File.Exists(storedPath));
+        Assert.True(File.Exists(result.RecyclePath));
         Assert.Empty(remainingItems);
-        Assert.Contains("已删除", result.StatusMessage);
+        Assert.NotNull(trackedItem);
+        Assert.Equal(result.RecycleEntryId!.Value.ToString(), trackedItem!.RecycleEntryId);
+        Assert.Single(recycleEntries);
+        Assert.Contains("已移入回收站", result.StatusMessage);
     }
 
     [Fact]
@@ -548,15 +554,16 @@ public sealed class DrawerServiceTests
 
         var result = await workspace.Service.DeleteItemAsync(item.Id);
 
-        Assert.True(result.PermanentlyDeleted);
-        Assert.Equal(storedPath, result.DeletedPath);
+        Assert.True(result.Recycled);
+        Assert.False(result.PermanentlyDeleted);
         Assert.Equal("existing", File.ReadAllText(source));
         Assert.False(File.Exists(storedPath));
-        Assert.Null(await workspace.Repository.GetItemAsync(item.Id));
+        Assert.True(File.Exists(result.RecyclePath));
+        Assert.NotNull(await workspace.Repository.GetItemAsync(item.Id));
     }
 
     [Fact]
-    public async Task DeleteItemAsync_NormalBoxDeletesStoredFileWhenOriginalDirectoryIsMissing()
+    public async Task DeleteItemAsync_NormalBoxRecyclesStoredFileWhenOriginalDirectoryIsMissing()
     {
         using var workspace = await TestWorkspace.CreateAsync();
         var source = workspace.CreateSourceFile("source-missing", "orphan.txt", "hello");
@@ -569,14 +576,15 @@ public sealed class DrawerServiceTests
         var result = await workspace.Service.DeleteItemAsync(item.Id);
 
         Assert.True(result.WasStoredItem);
-        Assert.True(result.PermanentlyDeleted);
-        Assert.Equal(storedPath, result.DeletedPath);
+        Assert.True(result.Recycled);
+        Assert.False(result.PermanentlyDeleted);
         Assert.False(File.Exists(storedPath));
-        Assert.Null(await workspace.Repository.GetItemAsync(item.Id));
+        Assert.True(File.Exists(result.RecyclePath));
+        Assert.NotNull(await workspace.Repository.GetItemAsync(item.Id));
     }
 
     [Fact]
-    public async Task DeleteItemAsync_MappingBoxPermanentlyDeletesSourceFileAndRemovesReference()
+    public async Task DeleteItemAsync_MappingBoxOnlyRemovesReferenceAndKeepsSourceFile()
     {
         using var workspace = await TestWorkspace.CreateAsync();
         var source = workspace.CreateSourceFile("source-a", "reference.txt", "hello");
@@ -586,11 +594,60 @@ public sealed class DrawerServiceTests
         var result = await workspace.Service.DeleteItemAsync(item.Id);
 
         Assert.False(result.WasStoredItem);
-        Assert.True(result.PermanentlyDeleted);
-        Assert.Equal(source, result.DeletedPath);
-        Assert.False(File.Exists(source));
+        Assert.False(result.PermanentlyDeleted);
+        Assert.False(result.Recycled);
+        Assert.Null(result.RecycleEntryId);
+        // 映射盒只保存链接：源文件必须原地不动。
+        Assert.True(File.Exists(source));
+        Assert.Equal("hello", File.ReadAllText(source));
         Assert.Null(await workspace.Repository.GetItemAsync(item.Id));
-        Assert.Contains("已删除", result.StatusMessage);
+        Assert.Empty(await workspace.Service.RecycleBin.GetEntriesAsync());
+        Assert.Contains("已移除引用", result.StatusMessage);
+    }
+
+    [Theory]
+    [InlineData(BoxType.Pixel)]
+    [InlineData(BoxType.Drawer)]
+    public async Task DeleteItemAsync_AppManagedBoxesMoveStoredFileToRecycleBinAndKeepItem(BoxType boxType)
+    {
+        using var workspace = await TestWorkspace.CreateAsync();
+        var source = workspace.CreateSourceFile("source-managed", "managed.txt", "payload");
+        var box = await workspace.Service.CreateBoxAsync($"{boxType} 盒", boxType);
+        var item = await workspace.Service.ImportPathAsync(box.Id, source);
+        var storedPath = item.StoredPath!;
+
+        var result = await workspace.Service.DeleteItemAsync(item.Id);
+        var remainingItems = await workspace.Service.GetItemsAsync(box.Id);
+        var trackedItem = await workspace.Repository.GetItemAsync(item.Id);
+        var entries = await workspace.Service.RecycleBin.GetEntriesAsync();
+
+        // 普通盒、像素盒、抽屉盒的删除语义与目标收纳盒一致：文件从盒子里消失，但先过回收站。
+        Assert.True(result.WasStoredItem);
+        Assert.True(result.Recycled);
+        Assert.False(result.PermanentlyDeleted);
+        Assert.NotNull(result.RecycleEntryId);
+        Assert.False(File.Exists(storedPath));
+        Assert.True(File.Exists(result.RecyclePath));
+        Assert.Empty(remainingItems);
+        Assert.NotNull(trackedItem);
+        Assert.Equal(result.RecycleEntryId!.Value.ToString(), trackedItem!.RecycleEntryId);
+
+        var entry = Assert.Single(entries);
+        Assert.Equal(box.Id, entry.BoxId);
+        Assert.Equal(boxType, entry.BoxType);
+        Assert.Equal(storedPath, entry.OriginalPath);
+        Assert.Contains("已移入回收站", result.StatusMessage);
+
+        // 还原后文件回到同一个盒子的存储目录，条目行重新可见。
+        var restore = await workspace.Service.RecycleBin.RestoreAsync(entry.Id);
+
+        Assert.True(restore.RestoredIntoBox);
+        Assert.Equal(box.Name, restore.BoxName);
+        Assert.True(File.Exists(storedPath));
+        Assert.Equal("payload", File.ReadAllText(storedPath));
+        Assert.Empty(await workspace.Service.RecycleBin.GetEntriesAsync());
+        Assert.Single(await workspace.Service.GetItemsAsync(box.Id));
+        Assert.Null((await workspace.Repository.GetItemAsync(item.Id))!.RecycleEntryId);
     }
 
     [Fact]
@@ -942,7 +999,7 @@ public sealed class DrawerServiceTests
     }
 
     [Fact]
-    public async Task ImportAndDeleteItemInBoundBoxMovesTheRealFile()
+    public async Task DeleteItemAsync_BoundBoxRemovesFileFromBoundFolderAndKeepsItInRecycleBin()
     {
         using var workspace = await TestWorkspace.CreateAsync();
         var boundFolder = Path.Combine(workspace.Root, "target");
@@ -958,9 +1015,52 @@ public sealed class DrawerServiceTests
 
         var result = await workspace.Service.DeleteItemAsync(item.Id);
 
-        Assert.True(result.RestoredToOriginal);
-        Assert.True(File.Exists(source));
+        // 目标收纳盒与硬盘文件夹双向同步：删除会真实移除绑定文件夹里的文件。
+        Assert.True(result.Recycled);
+        Assert.False(result.PermanentlyDeleted);
+        Assert.NotNull(result.RecycleEntryId);
+        Assert.NotNull(result.RecyclePath);
         Assert.False(File.Exists(storedPath));
+        Assert.True(File.Exists(result.RecyclePath));
+        Assert.False(File.Exists(source));
+        // 条目行保留并标记为已回收，列表里看不到，但还原时能回到绑定文件夹。
+        Assert.Empty(await workspace.Service.GetItemsAsync(box.Id));
+
+        var entries = await workspace.Service.RecycleBin.GetEntriesAsync();
+        var entry = Assert.Single(entries);
+        Assert.Equal(box.Id, entry.BoxId);
+        Assert.Equal(BoxType.Bound, entry.BoxType);
+        Assert.Equal(storedPath, entry.OriginalPath);
+
+        var restore = await workspace.Service.RecycleBin.RestoreAsync(entry.Id);
+
+        Assert.True(restore.RestoredIntoBox);
+        Assert.Equal(box.Name, restore.BoxName);
+        Assert.True(File.Exists(storedPath));
+        Assert.Equal("payload", File.ReadAllText(storedPath));
+        Assert.False(File.Exists(restore.Entry.RecyclePath));
+        Assert.Empty(await workspace.Service.RecycleBin.GetEntriesAsync());
+        var restoredItem = await workspace.Repository.GetItemAsync(item.Id);
+        Assert.NotNull(restoredItem);
+        Assert.Null(restoredItem!.RecycleEntryId);
+    }
+
+    [Fact]
+    public async Task DeleteItemAsync_BoundBoxSyncAfterRecycleKeepsTheRecycledItemRow()
+    {
+        using var workspace = await TestWorkspace.CreateAsync();
+        var boundFolder = Path.Combine(workspace.Root, "watched");
+        Directory.CreateDirectory(boundFolder);
+        var box = await workspace.Service.CreateBoundBoxAsync("watched", boundFolder);
+        var item = await workspace.Service.ImportPathAsync(box.Id, workspace.CreateSourceFile("s", "keep.txt", "x"));
+
+        await workspace.Service.DeleteItemAsync(item.Id);
+
+        // 目标收纳盒是实时同步的：同步不能把已回收的条目行当成“磁盘上已消失”而清掉，
+        // 否则还原时找不到原条目，只能退回桌面。
+        await workspace.Service.GetItemsAsync(box.Id);
+
+        Assert.NotNull(await workspace.Repository.GetItemAsync(item.Id));
         Assert.Empty(await workspace.Service.GetItemsAsync(box.Id));
     }
 

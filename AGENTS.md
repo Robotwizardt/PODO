@@ -20,7 +20,11 @@
 ## File Safety
 - Normal boxes move files into `%LocalAppData%\WitchDrawer\Boxes\{BoxId}` only after validating the destination path.
 - Mapping boxes never move, copy, or shortcut source files; they store absolute references only.
-- Delete restores stored items to their original locations by default; if the original directory is missing, restore falls back to the desktop. Mapping boxes only remove references.
+- Bound (target) boxes bind a real folder on disk and stay in sync with it in both directions; operating on an item in the box is the same as operating on the file in that folder.
+- Deleting an item from a normal, pixel, or drawer box moves the PODO-owned file into the PODO recycle bin (`%LocalAppData%\WitchDrawer\Recycle\{EntryId}`) instead of erasing it immediately; entries expire after `RecycleBinService.RetentionDays` (30) days or when the user empties the bin. Restoring puts the file back into the same box.
+- Deleting an item from a mapping box removes only the stored reference; the source file stays exactly where it was.
+- Deleting an item from a bound box removes the file from the bound folder because the folder is two-way synced, but still routes it through the recycle bin first; restoring puts the file back into the same folder.
+- Deleting a whole normal/pixel/drawer box restores its remaining items to their original locations; if the original directory is missing, restore falls back to the desktop.
 - File moves must support cross-volume paths (rename on same volume, copy-then-delete otherwise).
 - Name conflicts must be resolved by suffixing ` (1)`, ` (2)`, etc.
 

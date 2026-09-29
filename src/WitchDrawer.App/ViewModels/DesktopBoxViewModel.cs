@@ -2272,7 +2272,7 @@ public sealed class DesktopBoxViewModel : ObservableObject
             return;
         }
 
-        if ((Type is BoxType.Normal or BoxType.Mapping)
+        if ((Type is BoxType.Normal or BoxType.Pixel or BoxType.Drawer or BoxType.Mapping or BoxType.Bound)
             && !_confirmItemDeletion(item))
         {
             return;

@@ -70,11 +70,9 @@ public partial class DesktopPaperManagerWindow : Window
             return;
         }
 
-        if (MessageBox.Show(
+        if (AppDialog.Confirm(
                 $"“{paper.Title}”将被永久删除，无法恢复。是否继续？",
-                "删除桌面便签",
-                MessageBoxButton.YesNo,
-                MessageBoxImage.Warning) == MessageBoxResult.Yes)
+                "删除桌面便签"))
         {
             ViewModel.DeletePaper(paper);
         }
@@ -87,11 +85,9 @@ public partial class DesktopPaperManagerWindow : Window
             return;
         }
 
-        if (MessageBox.Show(
+        if (AppDialog.Confirm(
                 $"将永久删除 {ViewModel.HiddenPaperCount} 张已隐藏的桌面便签，无法恢复。是否继续？",
-                "清空已隐藏便签",
-                MessageBoxButton.YesNo,
-                MessageBoxImage.Warning) == MessageBoxResult.Yes)
+                "清空已隐藏便签"))
         {
             ViewModel.DeleteHiddenPapers();
         }

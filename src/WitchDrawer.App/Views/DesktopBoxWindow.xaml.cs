@@ -1541,7 +1541,7 @@ public partial class DesktopBoxWindow : Window
         ProjectDesktopRenamePopup.IsOpen = false;
         if (string.IsNullOrWhiteSpace(newName))
         {
-            MessageBox.Show(this, "名称不能为空。", "收纳盒", MessageBoxButton.OK, MessageBoxImage.Information);
+            AppDialog.Info(this, "名称不能为空。", "收纳盒");
             return;
         }
 
@@ -1629,12 +1629,7 @@ public partial class DesktopBoxWindow : Window
             : isProject
                 ? "删除项目收纳盒？"
                 : "删除收纳盒？";
-        if (MessageBox.Show(
-                this,
-                message,
-                title,
-                MessageBoxButton.YesNo,
-                MessageBoxImage.Warning) != MessageBoxResult.Yes)
+        if (!AppDialog.Confirm(this, message, title))
         {
             return;
         }
@@ -1663,12 +1658,7 @@ public partial class DesktopBoxWindow : Window
         }
         catch (Exception exception)
         {
-            MessageBox.Show(
-                this,
-                exception.Message,
-                failureMessage,
-                MessageBoxButton.OK,
-                MessageBoxImage.Error);
+            AppDialog.Error(this, exception.Message, failureMessage);
         }
     }
 

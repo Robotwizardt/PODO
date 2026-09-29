@@ -56,7 +56,7 @@ public partial class App : Application
                 return;
             }
 
-            MessageBox.Show(
+            AppDialog.Show(
                 $"PODO 当前以管理员身份运行，Windows 会阻止桌面文件拖入盒子。\n\n"
                 + $"自动切换到普通权限失败（错误码 {nativeErrorCode}）。请退出后直接双击启动，不要选择“以管理员身份运行”。",
                 "PODO 无法接收桌面拖放",
@@ -223,13 +223,11 @@ public partial class App : Application
             mainViewModel.UpdateRequested += async (_, result) =>
             {
                 var versionText = $"v{result.LatestVersion.Major}.{result.LatestVersion.Minor}.{result.LatestVersion.Build}";
-                var dialogResult = System.Windows.MessageBox.Show(
+                if (AppDialog.Show(
                     $"发现新版本 {versionText}\n\n是否立即更新？\n更新将自动下载并重启应用。",
                     "发现新版本",
                     System.Windows.MessageBoxButton.OKCancel,
-                    System.Windows.MessageBoxImage.Question);
-
-                if (dialogResult == System.Windows.MessageBoxResult.OK)
+                    System.Windows.MessageBoxImage.Question))
                 {
                     await mainViewModel.ExecuteUpdateAsync(result.DownloadUrl);
                 }
@@ -270,7 +268,7 @@ public partial class App : Application
                 sb.AppendLine("---");
                 ex = ex.InnerException;
             }
-            MessageBox.Show(
+            AppDialog.Show(
                 sb.ToString(),
                 "PODO 启动失败",
                 MessageBoxButton.OK,
@@ -486,7 +484,7 @@ public partial class App : Application
         // 删除确认只在这五种盒子里触发（见两个 ViewModel 的 Type 判断）：
         // 便签盒/待办盒/项目盒不接受文件拖入，条目行本来就没有文件，删行不会丢数据，因此不弹框。
         var isAppManagedFile = !string.IsNullOrWhiteSpace(item.Model.StoredPath);
-        var result = MessageBox.Show(
+        var result = AppDialog.Show(
             $"确定要删除{kind}“{item.DisplayName}”吗？\n\n"
             + (isAppManagedFile
                 ? "这会移除收纳盒里的文件。文件会先移入回收站并保留 30 天，期间可以在主窗口的回收站里还原。"
@@ -494,7 +492,7 @@ public partial class App : Application
             isAppManagedFile ? "确认删除" : "确认移除链接",
             MessageBoxButton.YesNo,
             MessageBoxImage.Warning);
-        return result == MessageBoxResult.Yes;
+        return result;
     }
 
     internal static IReadOnlyList<TrayMenuItem> CreateTrayMenuItems(bool isMainWindowVisible)
@@ -520,7 +518,7 @@ public partial class App : Application
         catch (Exception ex)
         {
             _logger?.Error(ex, "Failed to flush weekly plan before shutdown.");
-            MessageBox.Show("周计划尚未保存，暂未退出：" + ex.Message, "PODO", MessageBoxButton.OK, MessageBoxImage.Warning);
+            AppDialog.Show("周计划尚未保存，暂未退出：" + ex.Message, "PODO");
             _isPerformingShutdown = false;
             return;
         }

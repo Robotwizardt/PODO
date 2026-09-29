@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Diagnostics;
 using System.IO;
 using System.Security.Cryptography;
@@ -1014,11 +1014,9 @@ public sealed partial class PaperWindow
         }
         catch (Exception ex)
         {
-            MessageBox.Show(
+            PaperNoticeDialog.Show(
                 Strings.Format("OpenMarkdownFailureMessage", CurrentExternalMarkdownExtension(), ex.Message),
-                Strings.Get("OpenMarkdownFailureTitle"),
-                MessageBoxButton.OK,
-                MessageBoxImage.Warning);
+                Strings.Get("OpenMarkdownFailureTitle"));
         }
     }
 
@@ -1045,11 +1043,9 @@ public sealed partial class PaperWindow
         }
         catch (Exception ex)
         {
-            MessageBox.Show(
+            PaperNoticeDialog.Show(
                 Strings.Format("NoteFileSaveFailureMessage", ex.Message),
-                Strings.Get("NoteFileSaveFailureTitle"),
-                MessageBoxButton.OK,
-                MessageBoxImage.Warning);
+                Strings.Get("NoteFileSaveFailureTitle"));
         }
     }
 
@@ -1675,11 +1671,9 @@ public sealed partial class PaperWindow
             return;
         }
 
-        MessageBox.Show(
-            message,
+        PaperNoticeDialog.Show(
             Strings.Get("ScriptCapsuleFailureTitle"),
-            MessageBoxButton.OK,
-            MessageBoxImage.Warning);
+            message);
     }
 
 

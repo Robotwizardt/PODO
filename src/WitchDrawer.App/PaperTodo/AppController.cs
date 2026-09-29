@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.IO;
 using System.Reflection;
 using System.Text;
@@ -3694,11 +3694,9 @@ public sealed partial class AppController : IDisposable
         {
             TryExitCleanup(() =>
             {
-                MessageBox.Show(
-                    Strings.Get("ExitSaveFailureMessage"),
-                    Strings.Get("SaveFailureTitle"),
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Error);
+                PaperNoticeDialog.Show(
+                Strings.Get("ExitSaveFailureMessage"),
+                Strings.Get("SaveFailureTitle"));
             });
         }
 

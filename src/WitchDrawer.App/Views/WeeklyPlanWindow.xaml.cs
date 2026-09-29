@@ -76,5 +76,5 @@ public partial class WeeklyPlanWindow : Window
     public Task FlushAsync() { _saveTimer.Stop(); return SaveAsync(IsVisible); }
     private Task SaveAsync(bool visible) => _service.SaveWindowAsync(Left, Top, Width, _expandedHeight, _locked, _collapsed, visible);
     public void ForceClose() { _allowClose = true; Close(); }
-    private void ShowSaveError(Exception ex) => MessageBox.Show(this, "周计划窗口状态未能保存：" + ex.Message, "周计划", MessageBoxButton.OK, MessageBoxImage.Warning);
+    private void ShowSaveError(Exception ex) => AppDialog.Warn(this, "周计划窗口状态未能保存：" + ex.Message, "周计划");
 }

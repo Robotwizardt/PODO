@@ -9,7 +9,6 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
@@ -213,32 +212,6 @@
         </Border>
 
         <Border Grid.Row="2"
-                 Background="{DynamicResource GlassSurfaceBrush}"
-                 BorderBrush="{DynamicResource GlassStrokeBrush}"
-                BorderThickness="1"
-                 CornerRadius="{DynamicResource SurfaceCornerRadius}"
-                Padding="10"
-                Margin="0,0,0,10">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="*" />
-                </Grid.ColumnDefinitions>
-                <TextBlock Text="项目尺寸"
-                           Foreground="{DynamicResource TextMutedBrush}"
-                            FontSize="{DynamicResource CaptionFontSize}"
-                           VerticalAlignment="Center"
-                           Margin="0,0,10,0" />
-                <TextBlock Grid.Column="1"
-                           Text="默认随内容自适应；在桌面窗口直接拖动边缘即可调整大小。"
-                           Foreground="{DynamicResource TextMutedBrush}"
-                           FontSize="{DynamicResource CaptionFontSize}"
-                           TextWrapping="Wrap"
-                           VerticalAlignment="Center" />
-            </Grid>
-        </Border>
-
-        <Border Grid.Row="3"
                 Background="{DynamicResource GlassSurfaceBrush}"
                 BorderBrush="{DynamicResource GlassStrokeBrush}"
                 BorderThickness="1"

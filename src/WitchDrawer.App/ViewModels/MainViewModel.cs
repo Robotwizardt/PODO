@@ -428,25 +428,15 @@ public sealed class MainViewModel : ObservableObject
     }
 
     private static bool ConfirmRecycleBinDeletion(RecycleBinEntryViewModel entry)
-    {
-        var result = System.Windows.MessageBox.Show(
+        => AppDialog.Confirm(
             $"确定要彻底删除{entry.KindLabel}“{entry.DisplayName}”吗？\n\n"
             + "这会删除回收站里的实际文件，操作无法撤销。",
-            "确认彻底删除",
-            System.Windows.MessageBoxButton.YesNo,
-            System.Windows.MessageBoxImage.Warning);
-        return result == System.Windows.MessageBoxResult.Yes;
-    }
+            "确认彻底删除");
 
     private static bool ConfirmRecycleBinEmpty()
-    {
-        var result = System.Windows.MessageBox.Show(
+        => AppDialog.Confirm(
             "确定要清空回收站吗？\n\n回收站里的所有文件都会被彻底删除，操作无法撤销。",
-            "确认清空回收站",
-            System.Windows.MessageBoxButton.YesNo,
-            System.Windows.MessageBoxImage.Warning);
-        return result == System.Windows.MessageBoxResult.Yes;
-    }
+            "确认清空回收站");
 
     internal WeeklyPlanService CreateWeeklyPlanService(PaperTodoHost host) => new(host,
         new WitchDrawer.Core.Storage.WeeklyPlanStore(host.DataDirectory), LoadWeeklyPlanProjectsAsync);

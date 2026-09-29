@@ -9,22 +9,28 @@ namespace PaperTodo;
 
 internal static class PaperNoticeDialog
 {
-    public static void Show(Window owner, string titleText, string messageText)
+    public static void Show(string titleText, string messageText)
+        => Show(Application.Current?.MainWindow, titleText, messageText);
+
+    public static void Show(Window? owner, string titleText, string messageText)
     {
+        var effectiveOwner = owner is { IsLoaded: true } ? owner : null;
         var dialog = new Window
         {
-            Owner = owner,
+            Owner = effectiveOwner,
             Title = titleText,
             Width = 360,
             MinHeight = 164,
             SizeToContent = SizeToContent.Height,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            WindowStartupLocation = effectiveOwner is null
+                ? WindowStartupLocation.CenterScreen
+                : WindowStartupLocation.CenterOwner,
             WindowStyle = WindowStyle.None,
             ResizeMode = ResizeMode.NoResize,
             AllowsTransparency = true,
             Background = Brushes.Transparent,
             ShowInTaskbar = false,
-            Topmost = owner.Topmost,
+            Topmost = effectiveOwner?.Topmost ?? false,
             FontFamily = AppTypography.UiFontFamily,
             FontSize = AppTypography.Scale(12),
             Language = AppTypography.Language,

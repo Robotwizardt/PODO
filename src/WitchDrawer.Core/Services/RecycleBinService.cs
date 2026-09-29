@@ -284,7 +284,7 @@ public sealed class RecycleBinService
         var preferredPath = entry.OriginalPath;
         var preferredDirectory = string.IsNullOrWhiteSpace(preferredPath)
             ? null
-            : Path.GetDirectoryName(Path.GetFullPath(preferredPath));
+            : Path.GetDirectoryName(Path.GetFullPath(preferredPath!));
 
         string targetPath;
         var fellBackToDesktop = false;
@@ -292,7 +292,7 @@ public sealed class RecycleBinService
         {
             targetPath = FileNameService.GetUniqueDestinationPath(
                 preferredDirectory,
-                Path.GetFileName(Path.GetFullPath(preferredPath)),
+                Path.GetFileName(Path.GetFullPath(preferredPath!)),
                 entry.WasDirectory);
         }
         else

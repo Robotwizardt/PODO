@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
@@ -984,24 +984,20 @@ public sealed partial class PaperWindow
                     var paths = GetTodoFileDropPaths(e.Data);
                     if (paths.Length != 1)
                     {
-                        MessageBox.Show(
+                        PaperNoticeDialog.Show(
                             this,
-                            Strings.Get("LinkedPathSingleDropMessage"),
                             Strings.Get("LinkedPathDropFailureTitle"),
-                            MessageBoxButton.OK,
-                            MessageBoxImage.Information);
+                            Strings.Get("LinkedPathSingleDropMessage"));
                         return;
                     }
 
                     var path = Path.GetFullPath(paths[0]);
                     if (!File.Exists(path) && !Directory.Exists(path))
                     {
-                        MessageBox.Show(
+                        PaperNoticeDialog.Show(
                             this,
-                            Strings.Format("LinkedPathMissingMessage", path),
                             Strings.Get("LinkedPathOpenFailureTitle"),
-                            MessageBoxButton.OK,
-                            MessageBoxImage.Warning);
+                            Strings.Format("LinkedPathMissingMessage", path));
                         return;
                     }
 
@@ -1010,12 +1006,10 @@ public sealed partial class PaperWindow
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show(
+                    PaperNoticeDialog.Show(
                         this,
-                        Strings.Format("LinkedPathDropFailureMessage", ex.Message),
                         Strings.Get("LinkedPathDropFailureTitle"),
-                        MessageBoxButton.OK,
-                        MessageBoxImage.Warning);
+                        Strings.Format("LinkedPathDropFailureMessage", ex.Message));
                 }
                 finally
                 {
@@ -1303,12 +1297,10 @@ public sealed partial class PaperWindow
 
         if (!File.Exists(path) && !Directory.Exists(path))
         {
-            MessageBox.Show(
+            PaperNoticeDialog.Show(
                 this,
-                Strings.Format("LinkedPathMissingMessage", path),
                 Strings.Get("LinkedPathOpenFailureTitle"),
-                MessageBoxButton.OK,
-                MessageBoxImage.Warning);
+                Strings.Format("LinkedPathMissingMessage", path));
             ReconcileTodoRows(
                 [item.Id],
                 CurrentFocusedTodoItemId() ?? item.Id);
@@ -1340,12 +1332,10 @@ public sealed partial class PaperWindow
 
         if (string.IsNullOrWhiteSpace(location) || !Directory.Exists(location))
         {
-            MessageBox.Show(
+            PaperNoticeDialog.Show(
                 this,
-                Strings.Format("LinkedPathMissingMessage", path),
                 Strings.Get("LinkedPathOpenFailureTitle"),
-                MessageBoxButton.OK,
-                MessageBoxImage.Warning);
+                Strings.Format("LinkedPathMissingMessage", path));
             return;
         }
 
@@ -1364,12 +1354,10 @@ public sealed partial class PaperWindow
         }
         catch (Exception ex)
         {
-            MessageBox.Show(
+            PaperNoticeDialog.Show(
                 this,
-                Strings.Format("LinkedPathOpenFailureMessage", ex.Message),
                 Strings.Get("LinkedPathOpenFailureTitle"),
-                MessageBoxButton.OK,
-                MessageBoxImage.Warning);
+                Strings.Format("LinkedPathOpenFailureMessage", ex.Message));
         }
     }
 }

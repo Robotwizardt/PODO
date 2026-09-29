@@ -270,7 +270,8 @@
                         <TextBlock Text="今日进度"
                                    Foreground="{DynamicResource TextMutedBrush}"
                                     FontSize="{DynamicResource CaptionFontSize}" />
-                        <ProgressBar Height="5"
+                        <ProgressBar Style="{DynamicResource AppProgressBarStyle}"
+                                     Height="5"
                                      Margin="0,7,12,0"
                                      Minimum="0"
                                      Maximum="100"

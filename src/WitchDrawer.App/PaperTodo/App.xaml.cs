@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -96,11 +96,9 @@ public partial class App : Application
         catch (Exception ex)
         {
             WriteCrashLog(ex);
-            MessageBox.Show(
+            PaperNoticeDialog.Show(
                 Strings.Format("AppStartupFailureMessage", ex.Message),
-                Strings.Get("AppStartupFailureTitle"),
-                MessageBoxButton.OK,
-                MessageBoxImage.Error);
+                Strings.Get("AppStartupFailureTitle"));
 
             _singleInstance?.Dispose();
             _singleInstance = null;
@@ -286,11 +284,9 @@ public partial class App : Application
                 ? "AppDesktopRuntimeLoadFailureTitle"
                 : "AppUnhandledExceptionTitle";
 
-            MessageBox.Show(
+            PaperNoticeDialog.Show(
                 Strings.Format(messageKey, ex.Message),
-                Strings.Get(titleKey),
-                MessageBoxButton.OK,
-                MessageBoxImage.Warning);
+                Strings.Get(titleKey));
         }
         catch
         {

@@ -221,7 +221,7 @@ public partial class MainWindow : Window
             await _weeklyPlanService!.RefreshProjectsAsync();
             ViewModel.ShowWeeklyPlan();
         }
-        catch (Exception ex) { MessageBox.Show(this, ex.Message, "周计划", MessageBoxButton.OK, MessageBoxImage.Warning); }
+        catch (Exception ex) { AppDialog.Warn(this, ex.Message, "周计划"); }
     }
 
     private void ShowWeeklyPlanDesktop()
@@ -383,22 +383,19 @@ public partial class MainWindow : Window
                 Path.GetFullPath(viewModel.CurrentDataDirectory),
                 StringComparison.OrdinalIgnoreCase))
         {
-            MessageBox.Show(
+            AppDialog.Info(
                 this,
                 "所选文件夹就是当前数据目录，无需迁移。",
-                "数据存储位置",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information);
+                "数据存储位置");
             return;
         }
 
-        var confirm = MessageBox.Show(
-            this,
-            $"将把数据从\n{viewModel.CurrentDataDirectory}\n\n迁移到\n{targetDirectory}\n\n迁移完成后需要重启应用才会使用新目录，是否继续？",
-            "迁移数据存储位置",
-            MessageBoxButton.OKCancel,
-            MessageBoxImage.Question);
-        if (confirm != MessageBoxResult.OK)
+        if (!AppDialog.Show(
+                this,
+                $"将把数据从\n{viewModel.CurrentDataDirectory}\n\n迁移到\n{targetDirectory}\n\n迁移完成后需要重启应用才会使用新目录，是否继续？",
+                "迁移数据存储位置",
+                MessageBoxButton.OKCancel,
+                MessageBoxImage.Question))
         {
             return;
         }
@@ -410,22 +407,17 @@ public partial class MainWindow : Window
         catch (Exception exception)
         {
             _logger.Error(exception, "Data directory migration failed.");
-            MessageBox.Show(
+            AppDialog.Error(
                 this,
                 "数据迁移失败：\n" + exception.Message,
-                "数据存储位置",
-                MessageBoxButton.OK,
-                MessageBoxImage.Error);
+                "数据存储位置");
             return;
         }
 
-        var restart = MessageBox.Show(
-            this,
-            "数据已迁移完成。是否立即重启 WitchDrawer 以使用新目录？\n注意：若不立即重启，此后对盒子内容的修改在重启后不会保留。\n（原目录会保留作为备份，可稍后手动删除）",
-            "迁移完成",
-            MessageBoxButton.YesNo,
-            MessageBoxImage.Question);
-        if (restart != MessageBoxResult.Yes)
+        if (!AppDialog.Confirm(
+                this,
+                "数据已迁移完成。是否立即重启 WitchDrawer 以使用新目录？\n注意：若不立即重启，此后对盒子内容的修改在重启后不会保留。\n（原目录会保留作为备份，可稍后手动删除）",
+                "迁移完成"))
         {
             return;
         }

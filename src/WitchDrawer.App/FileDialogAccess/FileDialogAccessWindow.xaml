@@ -19,6 +19,10 @@
         PreviewKeyDown="OnPreviewKeyDown">
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
+        <!-- Opt in to the app-wide glass menu chrome without leaking it into
+             PaperTodo, which keeps its own ink-on-paper menu design. -->
+        <Style TargetType="{x:Type ContextMenu}" BasedOn="{StaticResource AppContextMenuStyle}" />
+        <Style TargetType="{x:Type MenuItem}" BasedOn="{StaticResource AppMenuItemStyle}" />
         <Style x:Key="HeaderIconButtonStyle" TargetType="Button">
             <Setter Property="Width" Value="30" />
             <Setter Property="Height" Value="30" />
@@ -128,11 +132,16 @@
                         AutomationProperties.Name="更多选项"
                         Click="OnMoreButtonClick">
                     <Button.ContextMenu>
-                        <ContextMenu Placement="Bottom"
-                                     Background="{DynamicResource AcrylicSurfaceBrush}"
-                                     BorderBrush="{DynamicResource AcrylicStrokeBrush}">
+                        <ContextMenu Placement="Bottom">
                             <MenuItem Header="对此应用不再显示"
-                                      Command="{Binding PlacementTarget.DataContext.BlacklistCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
+                                      Command="{Binding PlacementTarget.DataContext.BlacklistCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}">
+                                <MenuItem.Icon>
+                                    <TextBlock Text="&#xE7E8;"
+                                               FontFamily="Segoe MDL2 Assets"
+                                               FontSize="13"
+                                               Foreground="{DynamicResource TextMutedBrush}" />
+                                </MenuItem.Icon>
+                            </MenuItem>
                         </ContextMenu>
                     </Button.ContextMenu>
                 </Button>

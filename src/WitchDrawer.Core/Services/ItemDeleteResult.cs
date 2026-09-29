@@ -6,7 +6,9 @@ public sealed record ItemDeleteResult(
     bool WasStoredItem,
     string? RestoredPath,
     bool RestoredToOriginal,
-    bool RestoredToDesktop)
+    bool RestoredToDesktop,
+    bool PermanentlyDeleted = false,
+    string? DeletedPath = null)
 {
     public static ItemDeleteResult ReferenceRemoved(Guid itemId, string displayName)
     {
@@ -16,13 +18,37 @@ public sealed record ItemDeleteResult(
             WasStoredItem: false,
             RestoredPath: null,
             RestoredToOriginal: false,
-            RestoredToDesktop: false);
+            RestoredToDesktop: false,
+            PermanentlyDeleted: false,
+            DeletedPath: null);
+    }
+
+    public static ItemDeleteResult PermanentlyDeletedItem(
+        Guid itemId,
+        string displayName,
+        bool wasStoredItem,
+        string deletedPath)
+    {
+        return new ItemDeleteResult(
+            itemId,
+            displayName,
+            WasStoredItem: wasStoredItem,
+            RestoredPath: null,
+            RestoredToOriginal: false,
+            RestoredToDesktop: false,
+            PermanentlyDeleted: true,
+            DeletedPath: deletedPath);
     }
 
     public string StatusMessage
     {
         get
         {
+            if (PermanentlyDeleted)
+            {
+                return $"已删除 {DisplayName}";
+            }
+
             if (!WasStoredItem)
             {
                 return $"已移除引用 {DisplayName}";

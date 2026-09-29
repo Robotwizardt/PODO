@@ -2987,6 +2987,8 @@ public sealed partial class AppController : IDisposable
             (window.HasVisibleSurface || _isPreparingStartupEdgeCapsules);
     }
 
+    public event EventHandler? ContentChanged;
+
     public void MarkDirty()
     {
         if (IsExiting || _suppressDirty)
@@ -3005,6 +3007,14 @@ public sealed partial class AppController : IDisposable
 
         _saveTimer.Stop();
         _saveTimer.Start();
+        ContentChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>Refreshes an already open todo paper after a host integration edits its state.</summary>
+    public void RefreshTodoPaper(string paperId)
+    {
+        if (_windows.TryGetValue(paperId, out var window))
+            window.RefreshTodoRowsForExternalChange();
     }
 
     public void SaveNow(bool sync = false)

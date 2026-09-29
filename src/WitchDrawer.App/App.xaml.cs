@@ -149,7 +149,8 @@ public partial class App : Application
                 paths,
                 dataStorageMigrationService,
                 paperTodoHost: paperTodoHost,
-                fileDialogAccessSettings: fileDialogAccessSettings);
+                fileDialogAccessSettings: fileDialogAccessSettings,
+                confirmItemDeletion: ConfirmItemDeletion);
             _desktopBoxManager = new DesktopBoxManager(
                 drawerService,
                 todoService,
@@ -157,7 +158,8 @@ public partial class App : Application
                 logger,
                 boxVisualStyleStore,
                 boxPositionLockStateStore,
-                paperTodoHost: paperTodoHost);
+                paperTodoHost: paperTodoHost,
+                confirmItemDeletion: ConfirmItemDeletion);
             _mainWindow = new MainWindow(
                 mainViewModel,
                 quickPanel,
@@ -165,6 +167,7 @@ public partial class App : Application
                 quickPanelHotKeySettings,
                 quickPanelHotKey,
                 paperTodoHost);
+            await _mainWindow.InitializeWeeklyPlanAsync();
             _fileDialogAccessHost = new FileDialogAccessHost(
                 drawerService,
                 logger,
@@ -454,6 +457,20 @@ public partial class App : Application
         _taskbarIcon.Show();
     }
 
+    private static bool ConfirmItemDeletion(DrawerItemViewModel item)
+    {
+        var kind = item.Model.ItemKind == WitchDrawer.Core.Models.ItemKind.Directory
+            ? "文件夹"
+            : "文件";
+        var result = MessageBox.Show(
+            $"确定要永久删除{kind}“{item.DisplayName}”吗？\n\n"
+            + "这会删除实际文件，操作无法撤销。",
+            "确认永久删除",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning);
+        return result == MessageBoxResult.Yes;
+    }
+
     internal static IReadOnlyList<TrayMenuItem> CreateTrayMenuItems(bool isMainWindowVisible)
     {
         return
@@ -467,8 +484,20 @@ public partial class App : Application
         ];
     }
 
-    private void PerformShutdown()
+    private bool _isPerformingShutdown;
+
+    private async void PerformShutdown()
     {
+        if (_isPerformingShutdown) return;
+        _isPerformingShutdown = true;
+        try { if (_mainWindow is not null) await _mainWindow.FlushWeeklyPlanAsync(); }
+        catch (Exception ex)
+        {
+            _logger?.Error(ex, "Failed to flush weekly plan before shutdown.");
+            MessageBox.Show("周计划尚未保存，暂未退出：" + ex.Message, "PODO", MessageBoxButton.OK, MessageBoxImage.Warning);
+            _isPerformingShutdown = false;
+            return;
+        }
         _fileDialogAccessHost?.Dispose();
         _fileDialogAccessHost = null;
         _taskbarIcon?.Dispose();

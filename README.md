@@ -49,6 +49,8 @@ English: PODO is a native WPF Windows desktop workspace combining file drawers, 
 - **桌面待办纸片** — 集成 PaperTodo 原始待办纸片，支持直接添加、勾选、拖动排序、改名、置顶和胶囊折叠
 - **Markdown 笔记纸片** — 集成 PaperTodo 原始笔记纸，自动保存，支持 Markdown 编辑、预览、图片和桌面胶囊折叠
 - **统一入口** — PODO 主界面和系统托盘都能新建或显示全部桌面纸片；不会再单独启动第二个应用或托盘图标
+- **周计划** — 主界面左下角进入七天周表，每天上午、下午各安排最多 3 项；支持从现有待办选择或新建并排期、按项目与完成状态筛选、改期和取消排期。事项与 PaperTodo 原待办共用内容和完成状态，项目归属继承待办纸片关联的项目收纳盒。
+- **桌面周计划** — 从周计划页面打开独立浮窗，支持移动、缩放、锁定与收起；退出后记住显示状态和位置。取消排期保留来源待办，归档或删除的来源不会占用时段名额。
 - **旧便签迁移** — 首次启动会先将旧版 PODO 待办/笔记转入 PaperTodo 数据，再移除旧的收纳盒式便签记录
 
 ## 技术栈
@@ -128,6 +130,7 @@ dotnet test WitchDrawer.sln
   podo.db                 SQLite 数据库（收纳盒、项目和旧版迁移资料）
   Boxes\{BoxId}\          普通收纳盒的文件存储
   PaperTodo\data.json     PaperTodo 待办与笔记纸片数据
+  PaperTodo\weekly-plan.json  周计划排期引用与桌面窗口状态
   PaperTodo\note-assets.lmdb  PaperTodo 笔记图片数据
   logs\                   运行日志
 ```

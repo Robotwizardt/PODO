@@ -1,0 +1,23 @@
+﻿<Window x:Class="WitchDrawer.App.Views.WeeklyPlanWindow"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
+ Title="PODO 周计划" Width="660" Height="410" MinWidth="560" MinHeight="300"
+ WindowStyle="None" ResizeMode="CanResizeWithGrip" ShowInTaskbar="False" Background="{DynamicResource GlassSurfaceBrush}"
+ FontFamily="{DynamicResource AppFontFamily}" Foreground="{DynamicResource TextPrimaryBrush}" UseLayoutRounding="True">
+ <shell:WindowChrome.WindowChrome><shell:WindowChrome CaptionHeight="0" ResizeBorderThickness="5" GlassFrameThickness="0" UseAeroCaptionButtons="False"/></shell:WindowChrome.WindowChrome>
+ <Border Background="{DynamicResource AcrylicSurfaceBrush}" BorderBrush="{DynamicResource AcrylicStrokeBrush}" BorderThickness="1" CornerRadius="{DynamicResource WindowCornerRadius}">
+  <DockPanel>
+   <Border DockPanel.Dock="Top" Background="{DynamicResource GlassInnerBrush}" Padding="10,5" MouseLeftButtonDown="DragHeader">
+    <DockPanel>
+     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+      <Button Style="{DynamicResource GhostButtonStyle}" x:Name="LockButton" Click="ToggleLock" Content="锁定" Padding="8,4" Margin="0,0,4,0"/>
+      <Button Style="{DynamicResource GhostButtonStyle}" x:Name="CollapseButton" Click="ToggleCollapse" Content="收起" Padding="8,4" Margin="0,0,4,0"/>
+      <Button Style="{DynamicResource GhostButtonStyle}" Click="CloseClick" Content="×" ToolTip="隐藏周计划，可从主界面重新打开" Padding="8,4"/>
+     </StackPanel>
+     <TextBlock Text="周计划" VerticalAlignment="Center" FontWeight="SemiBold"/>
+    </DockPanel>
+   </Border>
+   <Grid x:Name="Root"/>
+  </DockPanel>
+ </Border>
+</Window>

@@ -13,7 +13,7 @@ namespace WitchDrawer.App.Infrastructure;
 /// PODO keeps ownership of startup, the tray icon, and its storage boxes;
 /// PaperTodo owns independent todo and markdown paper windows.
 /// </summary>
-public sealed class PaperTodoHost : IDisposable, IDesktopPaperService, IProjectTodoCountProvider
+public sealed class PaperTodoHost : IDisposable, IDesktopPaperService, IProjectTodoCountProvider, IWeeklyPlanTodoSource
 {
     private const string LegacyPaperPrefix = "podo-";
     private const string BoxPositionSettingPrefix = "BoxPosition:";
@@ -28,7 +28,91 @@ public sealed class PaperTodoHost : IDisposable, IDesktopPaperService, IProjectT
         _logger = logger;
     }
 
+    internal PaperTodoHost(AppController controller, string dataDirectory, IAppLogger logger)
+        : this(dataDirectory, logger) => AttachController(controller);
+
+    private void AttachController(AppController controller)
+    {
+        controller.PaperDragCompleted += OnPaperDragCompleted;
+        controller.PaperRemoved += OnPaperRemoved;
+        controller.TodoCountChanged += OnTodoCountChanged;
+        controller.ContentChanged += OnContentChanged;
+        _controller = controller;
+    }
+
     public bool IsReady => _controller?.IsRunning == true;
+
+    /// <summary>Directory containing PaperTodo's data.json and PODO-owned weekly-plan.json.</summary>
+    public string DataDirectory => _dataDirectory;
+
+    public event EventHandler? TodoContentChanged;
+
+    public IReadOnlyList<WeeklyPlanPaper> GetTodoPapers() => _controller?.State.Papers
+        .Where(p => p.Type == PaperTypes.Todo && !p.IsArchived)
+        .Select(p => new WeeklyPlanPaper(p.Id, string.IsNullOrWhiteSpace(p.Title) ? "未命名待办" : p.Title.Trim()))
+        .ToArray() ?? [];
+
+    public bool RemoveWeeklyPlanCreatedTodo(string paperId, string itemId)
+    {
+        if (_controller is not { IsRunning: true } controller) return false;
+        var paper = FindPaper(controller, paperId);
+        if (paper is null || paper.Items.RemoveAll(i => i.Id == itemId) == 0) return false;
+        controller.RefreshTodoPaper(paperId);
+        controller.MarkDirty();
+        controller.SaveNow();
+        return true;
+    }
+
+    /// <summary>Returns live todo items from the PaperTodo state, including archived papers.</summary>
+    public IReadOnlyList<WeeklyPlanSourceTodo> GetTodoSources()
+    {
+        if (_controller is not { IsRunning: true } controller)
+            return [];
+
+        return controller.State.Papers
+            .Where(p => string.Equals(p.Type, PaperTypes.Todo, StringComparison.Ordinal))
+            .SelectMany(p => p.Items.Where(i => !string.IsNullOrWhiteSpace(i.Text)).Select(i =>
+            {
+                return new WeeklyPlanSourceTodo(
+                    p.Id, i.Id, FirstNonEmpty(p.Title) is { Length: > 0 } title ? title : "未命名待办",
+                    i.Text.Trim(), i.Done, p.IsArchived);
+            }))
+            .ToArray();
+    }
+
+    public WeeklyPlanSourceTodo AddTodoItem(string paperId, string title)
+    {
+        if (string.IsNullOrWhiteSpace(title) || title.Trim().Length > 240)
+            throw new InvalidOperationException("请输入 1–240 字的待办内容。");
+        if (_controller is not { IsRunning: true } controller)
+            throw new InvalidOperationException("PaperTodo 尚未准备完成。");
+        var paper = FindPaper(controller, paperId);
+        if (paper is null || !string.Equals(paper.Type, PaperTypes.Todo, StringComparison.Ordinal) || paper.IsArchived)
+            throw new InvalidOperationException("目标待办标签不存在或已归档。");
+        var item = new PaperItem { Text = title.Trim(), Order = paper.Items.Count };
+        paper.Items.Add(item);
+        controller.MarkDirty();
+        controller.SaveNow();
+        controller.RefreshTodoPaper(paper!.Id);
+        var label = FirstNonEmpty(paper.Title);
+        return new WeeklyPlanSourceTodo(paper.Id, item.Id, label.Length == 0 ? "未命名待办" : label, item.Text, false, false);
+    }
+
+    public bool SetTodoItemCompleted(string paperId, string itemId, bool completed)
+    {
+        if (_controller is not { IsRunning: true } controller)
+            return false;
+        var paper = FindPaper(controller, paperId);
+        if (paper is null || paper.IsArchived || paper.Type != PaperTypes.Todo) return false;
+        var item = paper.Items.FirstOrDefault(i => string.Equals(i.Id, itemId, StringComparison.Ordinal));
+        if (item is null || item.Done == completed)
+            return item is not null;
+        item.Done = completed;
+        controller.MarkDirty();
+        controller.SaveNow();
+        controller.RefreshTodoPaper(paper!.Id);
+        return true;
+    }
 
     public event EventHandler<PaperDragCompletedEventArgs>? PaperDragCompleted;
 
@@ -67,10 +151,7 @@ public sealed class PaperTodoHost : IDisposable, IDesktopPaperService, IProjectT
             // An empty desktop is a valid persisted state. Users can create a paper from
             // PODO's tray menu without a deleted default paper returning on the next launch.
             await controller.StartAsync(createDefaultPaper: false);
-            controller.PaperDragCompleted += OnPaperDragCompleted;
-            controller.PaperRemoved += OnPaperRemoved;
-            controller.TodoCountChanged += OnTodoCountChanged;
-            _controller = controller;
+            AttachController(controller);
             _logger.Info("PaperTodo desktop-paper engine is ready inside PODO.");
         }
         catch
@@ -233,12 +314,15 @@ public sealed class PaperTodoHost : IDisposable, IDesktopPaperService, IProjectT
             controller.PaperDragCompleted -= OnPaperDragCompleted;
             controller.PaperRemoved -= OnPaperRemoved;
             controller.TodoCountChanged -= OnTodoCountChanged;
+            controller.ContentChanged -= OnContentChanged;
         }
         controller?.Dispose();
     }
 
     private void OnPaperDragCompleted(object? sender, PaperDragCompletedEventArgs e) =>
         PaperDragCompleted?.Invoke(this, e);
+
+    private void OnContentChanged(object? sender, EventArgs e) => TodoContentChanged?.Invoke(this, e);
 
     private void OnPaperRemoved(object? sender, PaperRemovedEventArgs e) =>
         PaperRemoved?.Invoke(this, e);
@@ -313,6 +397,7 @@ public sealed class PaperTodoHost : IDisposable, IDesktopPaperService, IProjectT
         ?? string.Empty;
 
     private static string FirstNonEmpty(string? value) => (value ?? string.Empty).Trim();
+
 
     private void CreatePaper(string type)
     {

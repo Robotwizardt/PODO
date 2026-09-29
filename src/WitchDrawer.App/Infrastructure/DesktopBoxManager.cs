@@ -35,6 +35,7 @@ public sealed class DesktopBoxManager
     private readonly IAppLogger _logger;
     private readonly BoxVisualStyleStore _boxVisualStyleStore;
     private readonly BoxPositionLockStateStore _boxPositionLockStateStore;
+    private readonly Func<DrawerItemViewModel, bool> _confirmItemDeletion;
     private readonly PaperTodoHost? _paperTodoHost;
     private readonly Dictionary<Guid, DesktopBoxWindow> _windows = [];
     private readonly Dictionary<Guid, Point> _lastWindowOrigins = [];
@@ -74,7 +75,8 @@ public sealed class DesktopBoxManager
         BoxVisualStyleStore boxVisualStyleStore,
         BoxPositionLockStateStore boxPositionLockStateStore,
         ProjectService? projectService = null,
-        PaperTodoHost? paperTodoHost = null)
+        PaperTodoHost? paperTodoHost = null,
+        Func<DrawerItemViewModel, bool>? confirmItemDeletion = null)
     {
         _drawerService = drawerService;
         _todoService = todoService;
@@ -84,6 +86,7 @@ public sealed class DesktopBoxManager
         _logger = logger;
         _boxVisualStyleStore = boxVisualStyleStore;
         _boxPositionLockStateStore = boxPositionLockStateStore;
+        _confirmItemDeletion = confirmItemDeletion ?? (_ => true);
         _paperTodoHost = paperTodoHost;
         if (_paperTodoHost is not null)
         {
@@ -212,7 +215,8 @@ public sealed class DesktopBoxManager
                         layoutSettings,
                         _projectService,
                         projectFolderService: _projectFolderService,
-                        projectTodoCountProvider: _paperTodoHost);
+                        projectTodoCountProvider: _paperTodoHost,
+                        confirmItemDeletion: _confirmItemDeletion);
                     await viewModel.LoadDrawerCoverSizeAsync();
                     await viewModel.LoadTitleVisibilityAsync();
                     await viewModel.LoadFileNameVisibilityAsync();

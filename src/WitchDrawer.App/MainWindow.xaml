@@ -643,6 +643,9 @@
                                      Background="{DynamicResource BorderBrushSoft}"
                                      Opacity="0.72" />
 
+                            <Button Content="▦  周计划" Click="OnWeeklyPlanClicked"
+                                    Style="{StaticResource GhostButtonStyle}" Margin="0,0,0,5"
+                                    AutomationProperties.Name="周计划" />
                             <UniformGrid Columns="2">
                                 <Button Command="{Binding ShowProjectCommand}"
                                         Style="{StaticResource NavProjectButtonStyle}"
@@ -726,6 +729,15 @@
 
                 <!-- Right Content Area -->
                 <Grid Grid.Column="1" Margin="24,18,24,22" VerticalAlignment="Stretch">
+                    <ContentControl x:Name="WeeklyPlanPageHost" Panel.ZIndex="10"
+                                    HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch">
+                        <ContentControl.Style><Style TargetType="ContentControl">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                            <Style.Triggers><DataTrigger Binding="{Binding IsWeeklyPlanPage}" Value="True">
+                                <Setter Property="Visibility" Value="Visible" />
+                            </DataTrigger></Style.Triggers>
+                        </Style></ContentControl.Style>
+                    </ContentControl>
                     <!-- Dashboard Page -->
                     <Grid VerticalAlignment="Stretch">
                         <Grid.Style>
@@ -739,6 +751,9 @@
                                         <Setter Property="Visibility" Value="Collapsed" />
                                     </DataTrigger>
                                     <DataTrigger Binding="{Binding IsArchivePage}" Value="True">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding IsWeeklyPlanPage}" Value="True">
                                         <Setter Property="Visibility" Value="Collapsed" />
                                     </DataTrigger>
                                 </Style.Triggers>
@@ -1918,7 +1933,7 @@
                                                        Foreground="{DynamicResource TextPrimaryBrush}"
                                                        FontSize="13.5"
                                                        FontWeight="SemiBold" />
-                                            <TextBlock Text="  ·  双击打开，按 Delete 移除"
+                                            <TextBlock Text="  ·  双击打开，按 Delete 永久删除"
                                                        Foreground="{DynamicResource TextMutedBrush}"
                                                         FontSize="{DynamicResource CaptionFontSize}"
                                                        VerticalAlignment="Center" />
@@ -2110,7 +2125,7 @@
                                                                     Padding="0"
                                                                     Foreground="{DynamicResource TextMutedBrush}"
                                                                     Style="{StaticResource GhostButtonStyle}"
-                                                                    ToolTip="从收纳盒移除"
+                                                                    ToolTip="永久删除文件"
                                                                     Command="{Binding DataContext.DeleteItemCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                                                     CommandParameter="{Binding}">
                                                                 <Path Data="M 2,4 L 14,4 M 5,4 L 5,2 L 11,2 L 11,4 M 4,4 L 4.8,15 L 11.2,15 L 12,4 M 7,7 L 7,12 M 9,7 L 9,12"

@@ -2758,6 +2758,13 @@ public partial class DesktopBoxWindow : Window
         var data = new DataObject();
         data.SetData(InternalDrawerItemDragFormat, payload, autoConvert: false);
         var canExportPath = PathExists(drawerItem.PathLabel);
+        if (canExportPath)
+        {
+            // Also expose the real path so Explorer can complete a normal shell move when
+            // the pointer is released over a desktop folder. The internal payload remains
+            // the preferred format for drops onto another WitchDrawer box.
+            data.SetData(DataFormats.FileDrop, new[] { drawerItem.PathLabel }, autoConvert: false);
+        }
 
         var dragWasCanceled = false;
         QueryContinueDragEventHandler queryContinueDrag = (_, args) =>
@@ -2768,10 +2775,8 @@ public partial class DesktopBoxWindow : Window
             }
         };
 
-        // The drag carries no OS file data, so the desktop/Explorer reports "no drop" and the
-        // shell shows a forbidden (🚫) cursor — misleading, because releasing there still moves
-        // the item to the desktop. Override the feedback: keep the normal move cursor over valid
-        // in-app targets, and show a neutral hand instead of 🚫 everywhere else.
+        // Keep a neutral cursor when no target accepts the drop. Once Explorer or another
+        // WitchDrawer box reports a move/copy effect, let the normal shell cursor show.
         GiveFeedbackEventHandler giveFeedback = (_, args) =>
         {
             args.Handled = true;
@@ -2804,12 +2809,13 @@ public partial class DesktopBoxWindow : Window
 
         try
         {
-            DragDrop.DoDragDrop(dragSource, data, DragDropEffects.Move);
+            var dragResult = DragDrop.DoDragDrop(dragSource, data, DragDropEffects.Move);
             var internalDropSucceeded = payload.WasDroppedInsideWitchDrawer
                 || ConsumeDroppedInsideWitchDrawer(payload);
             var cursorOverWindow = IsCursorOverWitchDrawerWindow();
             var cursorOverPopup = IsCursorOverOpenDrawerPopup();
             var cursorOverApp = cursorOverWindow || cursorOverPopup;
+            var pathStillExists = PathExists(drawerItem.PathLabel);
 
             if (internalDropSucceeded)
             {
@@ -2825,13 +2831,25 @@ public partial class DesktopBoxWindow : Window
             }
             else if (ShouldExportItemAfterDrag(
                          dragWasCanceled,
-                         canExportPath,
+                         canExportPath && pathStillExists,
                          cursorOverApp,
-                         internalDropSucceeded))
+                         internalDropSucceeded,
+                         dragResult))
             {
                 // Released outside every WitchDrawer window → move the file to the desktop.
                 var exported = await ViewModel.ExportItemToDesktopAsync(drawerItem);
                 if (exported)
+                {
+                    _keyboardDeleteTarget = null;
+                }
+            }
+            else if (HasAcceptedExternalDrop(dragResult)
+                     || (!pathStillExists && !dragWasCanceled && !cursorOverApp))
+            {
+                // Explorer has already moved/copied the real path. Refresh the source box so
+                // its database row disappears when the source path was moved away.
+                var removed = await ViewModel.RefreshAfterExternalDragAsync(drawerItem);
+                if (removed)
                 {
                     _keyboardDeleteTarget = null;
                 }
@@ -2862,12 +2880,21 @@ public partial class DesktopBoxWindow : Window
         bool dragWasCanceled,
         bool canExportPath,
         bool cursorOverApp,
-        bool internalDropSucceeded)
+        bool internalDropSucceeded,
+        DragDropEffects dragResult = DragDropEffects.None)
     {
         return !dragWasCanceled
             && canExportPath
             && !cursorOverApp
-            && !internalDropSucceeded;
+            && !internalDropSucceeded
+            && !HasAcceptedExternalDrop(dragResult);
+    }
+
+    private static bool HasAcceptedExternalDrop(DragDropEffects dragResult)
+    {
+        const DragDropEffects acceptedEffects =
+            DragDropEffects.Move | DragDropEffects.Copy | DragDropEffects.Link;
+        return (dragResult & acceptedEffects) != DragDropEffects.None;
     }
 
     private void ResetDragVisualState()

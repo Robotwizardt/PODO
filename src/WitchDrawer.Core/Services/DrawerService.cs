@@ -866,14 +866,20 @@ public sealed class DrawerService
         var item = await _repository.GetItemAsync(itemId, cancellationToken)
             ?? throw new InvalidOperationException("Item does not exist.");
 
+        var sourceBox = await _repository.GetBoxAsync(item.BoxId, cancellationToken)
+            ?? throw new InvalidOperationException("Source box does not exist.");
+
+        if (sourceBox.Type is BoxType.Normal or BoxType.Mapping)
+        {
+            return await PermanentlyDeleteItemAsync(item, sourceBox, cancellationToken);
+        }
+
         if (string.IsNullOrWhiteSpace(item.StoredPath))
         {
             await _repository.RemoveItemAsync(itemId, cancellationToken);
             return ItemDeleteResult.ReferenceRemoved(item.Id, item.DisplayName);
         }
 
-        var sourceBox = await _repository.GetBoxAsync(item.BoxId, cancellationToken)
-            ?? throw new InvalidOperationException("Source box does not exist.");
         using var boundSyncGate = await AcquireBoundSyncGateAsync(
             sourceBox.Type == BoxType.Bound,
             cancellationToken);
@@ -895,6 +901,38 @@ public sealed class DrawerService
         }
 
         return restore;
+    }
+
+    private async Task<ItemDeleteResult> PermanentlyDeleteItemAsync(
+        DrawerItem item,
+        Box sourceBox,
+        CancellationToken cancellationToken)
+    {
+        var path = !string.IsNullOrWhiteSpace(item.StoredPath)
+            ? PathSafety.GetFullExistingPath(item.StoredPath)
+            : !string.IsNullOrWhiteSpace(item.SourcePath)
+                ? PathSafety.GetFullExistingPath(item.SourcePath)
+                : throw new InvalidOperationException("Item has no file path.");
+
+        if (!string.IsNullOrWhiteSpace(item.StoredPath))
+        {
+            EnsureStoredItemPathBelongsToBox(sourceBox, path);
+        }
+
+        PathSafety.EnsureNoReparsePoints(path);
+        var isDirectory = Directory.Exists(path);
+        await SafeFileOps.DeleteAsync(path, isDirectory, cancellationToken);
+        if (File.Exists(path) || Directory.Exists(path))
+        {
+            throw new IOException($"无法删除文件：{path}");
+        }
+
+        await _repository.RemoveItemAsync(item.Id, CancellationToken.None);
+        return ItemDeleteResult.PermanentlyDeletedItem(
+            item.Id,
+            item.DisplayName,
+            wasStoredItem: !string.IsNullOrWhiteSpace(item.StoredPath),
+            deletedPath: path);
     }
 
     public async Task<BoxDeleteResult> DeleteBoxAsync(Guid boxId, CancellationToken cancellationToken = default)
@@ -1193,6 +1231,22 @@ public sealed class DrawerService
             }
 
             var currentItems = await _repository.GetItemsAsync(box.Id, cancellationToken);
+            var officeLockItemIds = currentItems
+                .Where(IsTrackedOfficeLockFile)
+                .Select(item => item.Id)
+                .ToHashSet();
+            foreach (var itemId in officeLockItemIds)
+            {
+                await _repository.RemoveItemAsync(itemId, cancellationToken);
+            }
+
+            if (officeLockItemIds.Count > 0)
+            {
+                currentItems = currentItems
+                    .Where(item => !officeLockItemIds.Contains(item.Id))
+                    .ToArray();
+            }
+
             var existingPaths = currentItems
                 .Where(item => !string.IsNullOrWhiteSpace(item.StoredPath))
                 .Select(item => Path.GetFullPath(item.StoredPath!))
@@ -1340,7 +1394,8 @@ public sealed class DrawerService
 
             var fullPath = Path.GetFullPath(path);
             var isDirectory = (attributes & FileAttributes.Directory) != 0;
-            if (!isDirectory && IsIncompleteDownloadPath(fullPath))
+            if (!isDirectory
+                && (IsIncompleteDownloadPath(fullPath) || IsOfficeLockFilePath(fullPath)))
             {
                 return null;
             }
@@ -1372,6 +1427,19 @@ public sealed class DrawerService
             || extension.Equals(".part", StringComparison.OrdinalIgnoreCase)
             || extension.Equals(".partial", StringComparison.OrdinalIgnoreCase)
             || extension.Equals(".download", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsOfficeLockFilePath(string path)
+    {
+        return Path.GetFileName(path).StartsWith("~$", StringComparison.Ordinal);
+    }
+
+    private static bool IsTrackedOfficeLockFile(DrawerItem item)
+    {
+        return item.ItemKind == ItemKind.File
+            && string.IsNullOrWhiteSpace(item.SourcePath)
+            && !string.IsNullOrWhiteSpace(item.StoredPath)
+            && IsOfficeLockFilePath(item.StoredPath);
     }
 
     private string GetStorageRoot(Box box, bool createIfMissing)

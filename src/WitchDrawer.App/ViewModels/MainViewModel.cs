@@ -36,6 +36,7 @@ public sealed class MainViewModel : ObservableObject
     private readonly DataStorageMigrationService _dataStorageMigrationService;
     private readonly IDesktopPaperService? _paperTodoHost;
     private readonly FileDialogAccessSettingsStore? _fileDialogAccessSettings;
+    private readonly Func<DrawerItemViewModel, bool> _confirmItemDeletion;
     private BoxViewModel? _selectedBox;
     private CancellationTokenSource? _itemsLoadCts;
     private int _itemsLoadVersion;
@@ -46,6 +47,7 @@ public sealed class MainViewModel : ObservableObject
     private bool _isSettingsPage;
     private bool _isAboutPage;
     private bool _isArchivePage;
+    private bool _isWeeklyPlanPage;
     private string _statusText = "准备就绪";
     private string _themeLabel = "清透雅致";
     private AppTheme _currentTheme;
@@ -74,7 +76,8 @@ public sealed class MainViewModel : ObservableObject
         DataStorageMigrationService dataStorageMigrationService,
         ProjectService? projectService = null,
         IDesktopPaperService? paperTodoHost = null,
-        FileDialogAccessSettingsStore? fileDialogAccessSettings = null)
+        FileDialogAccessSettingsStore? fileDialogAccessSettings = null,
+        Func<DrawerItemViewModel, bool>? confirmItemDeletion = null)
     {
         _drawerService = drawerService;
         _todoService = todoService;
@@ -88,6 +91,7 @@ public sealed class MainViewModel : ObservableObject
         _dataStorageMigrationService = dataStorageMigrationService;
         _paperTodoHost = paperTodoHost;
         _fileDialogAccessSettings = fileDialogAccessSettings;
+        _confirmItemDeletion = confirmItemDeletion ?? (_ => true);
         if (_fileDialogAccessSettings is not null)
         {
             _fileDialogAccessSettings.SettingsChanged += (_, settings) =>
@@ -149,6 +153,7 @@ public sealed class MainViewModel : ObservableObject
         CheckForUpdateCommand = new AsyncRelayCommand(CheckForUpdateAsync);
         ShowDashboardCommand = new RelayCommand(() =>
         {
+            IsWeeklyPlanPage = false;
             IsArchivePage = false;
             IsSettingsPage = false;
             IsAboutPage = false;
@@ -277,6 +282,7 @@ public sealed class MainViewModel : ObservableObject
         get => _selectedBox;
         set
         {
+            if (value is not null) IsWeeklyPlanPage = false;
             if (UpdateSelectedBoxCore(value))
             {
                 QueueSelectedBoxItemsLoad();
@@ -307,20 +313,49 @@ public sealed class MainViewModel : ObservableObject
     public bool IsSettingsPage
     {
         get => _isSettingsPage;
-        set => SetProperty(ref _isSettingsPage, value);
+        set { if (value) IsWeeklyPlanPage = false; SetProperty(ref _isSettingsPage, value); }
     }
 
     public bool IsAboutPage
     {
         get => _isAboutPage;
-        set => SetProperty(ref _isAboutPage, value);
+        set { if (value) IsWeeklyPlanPage = false; SetProperty(ref _isAboutPage, value); }
     }
 
     public bool IsArchivePage
     {
         get => _isArchivePage;
-        set => SetProperty(ref _isArchivePage, value);
+        set { if (value) IsWeeklyPlanPage = false; SetProperty(ref _isArchivePage, value); }
     }
+
+    public bool IsWeeklyPlanPage
+    {
+        get => _isWeeklyPlanPage;
+        private set => SetProperty(ref _isWeeklyPlanPage, value);
+    }
+
+    public void ShowWeeklyPlan()
+    {
+        SelectedBox = null;
+        IsSettingsPage = IsAboutPage = IsArchivePage = false;
+        IsWeeklyPlanPage = true;
+    }
+
+    internal WeeklyPlanService CreateWeeklyPlanService(PaperTodoHost host) => new(host,
+        new WitchDrawer.Core.Storage.WeeklyPlanStore(host.DataDirectory), LoadWeeklyPlanProjectsAsync);
+
+    private Task<IReadOnlyDictionary<string, WeeklyPlanProject>> LoadWeeklyPlanProjectsAsync() => Task.Run(async () =>
+    {
+        var result = new Dictionary<string, WeeklyPlanProject>(StringComparer.Ordinal);
+        foreach (var box in (await _drawerService.GetBoxesAsync()).Where(b => b.Type == BoxType.Project && !b.IsArchived))
+        {
+            var project = await _projectService.GetOrCreateProjectAsync(box.Id);
+            var color = ProjectStageCatalog.Get(project.Stage).Color;
+            foreach (var link in await _projectService.GetLinkedPapersAsync(box.Id))
+                result[link.PaperId] = new WeeklyPlanProject(box.Id.ToString(), box.Name, color);
+        }
+        return (IReadOnlyDictionary<string, WeeklyPlanProject>)result;
+    });
 
     public string StatusText
     {
@@ -939,6 +974,7 @@ public sealed class MainViewModel : ObservableObject
 
     private bool UpdateSelectedBoxCore(BoxViewModel? value)
     {
+        if (value is not null) IsWeeklyPlanPage = false;
         if (EqualityComparer<BoxViewModel?>.Default.Equals(_selectedBox, value))
         {
             return false;
@@ -1111,6 +1147,12 @@ public sealed class MainViewModel : ObservableObject
     private async Task DeleteItemAsync(DrawerItemViewModel? item)
     {
         if (item is null)
+        {
+            return;
+        }
+
+        if ((SelectedBox?.Type is BoxType.Normal or BoxType.Mapping)
+            && !_confirmItemDeletion(item))
         {
             return;
         }

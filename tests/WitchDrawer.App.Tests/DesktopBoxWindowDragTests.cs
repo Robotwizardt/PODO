@@ -1,3 +1,4 @@
+using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using WitchDrawer.App.ViewModels;
@@ -15,7 +16,22 @@ public sealed class DesktopBoxWindowDragTests
             dragWasCanceled: false,
             canExportPath: true,
             cursorOverApp: false,
-            internalDropSucceeded: false));
+            internalDropSucceeded: false,
+            dragResult: DragDropEffects.None));
+    }
+
+    [Theory]
+    [InlineData(DragDropEffects.Move)]
+    [InlineData(DragDropEffects.Copy)]
+    [InlineData(DragDropEffects.Link)]
+    public void AcceptedExternalDrop_DoesNotExportAgainToDesktopRoot(DragDropEffects dragResult)
+    {
+        Assert.False(DesktopBoxWindow.ShouldExportItemAfterDrag(
+            dragWasCanceled: false,
+            canExportPath: true,
+            cursorOverApp: false,
+            internalDropSucceeded: false,
+            dragResult: dragResult));
     }
 
     [Theory]

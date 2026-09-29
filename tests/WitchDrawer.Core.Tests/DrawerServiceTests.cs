@@ -514,7 +514,7 @@ public sealed class DrawerServiceTests
     }
 
     [Fact]
-    public async Task DeleteItemAsync_NormalBoxRestoresItemToOriginalLocationAndRemovesItem()
+    public async Task DeleteItemAsync_NormalBoxPermanentlyDeletesStoredFileAndRemovesItem()
     {
         using var workspace = await TestWorkspace.CreateAsync();
         var source = workspace.CreateSourceFile("source-a", "delete-me.txt", "hello");
@@ -526,17 +526,18 @@ public sealed class DrawerServiceTests
         var remainingItems = await workspace.Repository.GetItemsAsync(normalBox.Id);
 
         Assert.True(result.WasStoredItem);
-        Assert.True(result.RestoredToOriginal);
+        Assert.True(result.PermanentlyDeleted);
+        Assert.Equal(storedPath, result.DeletedPath);
+        Assert.False(result.RestoredToOriginal);
         Assert.False(result.RestoredToDesktop);
-        Assert.Equal(source, result.RestoredPath);
-        Assert.True(File.Exists(source));
-        Assert.Equal("hello", File.ReadAllText(source));
+        Assert.False(File.Exists(source));
         Assert.False(File.Exists(storedPath));
         Assert.Empty(remainingItems);
+        Assert.Contains("已删除", result.StatusMessage);
     }
 
     [Fact]
-    public async Task DeleteItemAsync_NormalBoxAddsSuffixWhenOriginalPathAlreadyExists()
+    public async Task DeleteItemAsync_NormalBoxDoesNotTouchOriginalPathWhenItStillExists()
     {
         using var workspace = await TestWorkspace.CreateAsync();
         var source = workspace.CreateSourceFile("source-a", "conflict.txt", "stored");
@@ -546,19 +547,16 @@ public sealed class DrawerServiceTests
         File.WriteAllText(source, "existing");
 
         var result = await workspace.Service.DeleteItemAsync(item.Id);
-        var restoredPath = Path.Combine(Path.GetDirectoryName(source)!, "conflict (1).txt");
 
-        Assert.True(result.RestoredToOriginal);
-        Assert.Equal(restoredPath, result.RestoredPath);
+        Assert.True(result.PermanentlyDeleted);
+        Assert.Equal(storedPath, result.DeletedPath);
         Assert.Equal("existing", File.ReadAllText(source));
-        Assert.True(File.Exists(restoredPath));
-        Assert.Equal("stored", File.ReadAllText(restoredPath));
         Assert.False(File.Exists(storedPath));
         Assert.Null(await workspace.Repository.GetItemAsync(item.Id));
     }
 
     [Fact]
-    public async Task DeleteItemAsync_FallsBackToDesktopWhenOriginalDirectoryMissing()
+    public async Task DeleteItemAsync_NormalBoxDeletesStoredFileWhenOriginalDirectoryIsMissing()
     {
         using var workspace = await TestWorkspace.CreateAsync();
         var source = workspace.CreateSourceFile("source-missing", "orphan.txt", "hello");
@@ -570,32 +568,15 @@ public sealed class DrawerServiceTests
 
         var result = await workspace.Service.DeleteItemAsync(item.Id);
 
-        try
-        {
-            Assert.True(result.WasStoredItem);
-            Assert.False(result.RestoredToOriginal);
-            Assert.True(result.RestoredToDesktop);
-            Assert.False(string.IsNullOrWhiteSpace(result.RestoredPath));
-            Assert.True(File.Exists(result.RestoredPath));
-            Assert.Equal("hello", File.ReadAllText(result.RestoredPath!));
-            Assert.StartsWith(
-                Path.GetFullPath(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory)),
-                Path.GetFullPath(result.RestoredPath!),
-                StringComparison.OrdinalIgnoreCase);
-            Assert.False(File.Exists(storedPath));
-            Assert.Null(await workspace.Repository.GetItemAsync(item.Id));
-        }
-        finally
-        {
-            if (!string.IsNullOrWhiteSpace(result.RestoredPath) && File.Exists(result.RestoredPath))
-            {
-                File.Delete(result.RestoredPath);
-            }
-        }
+        Assert.True(result.WasStoredItem);
+        Assert.True(result.PermanentlyDeleted);
+        Assert.Equal(storedPath, result.DeletedPath);
+        Assert.False(File.Exists(storedPath));
+        Assert.Null(await workspace.Repository.GetItemAsync(item.Id));
     }
 
     [Fact]
-    public async Task DeleteItemAsync_MappingBoxOnlyRemovesReference()
+    public async Task DeleteItemAsync_MappingBoxPermanentlyDeletesSourceFileAndRemovesReference()
     {
         using var workspace = await TestWorkspace.CreateAsync();
         var source = workspace.CreateSourceFile("source-a", "reference.txt", "hello");
@@ -605,9 +586,11 @@ public sealed class DrawerServiceTests
         var result = await workspace.Service.DeleteItemAsync(item.Id);
 
         Assert.False(result.WasStoredItem);
-        Assert.True(File.Exists(source));
+        Assert.True(result.PermanentlyDeleted);
+        Assert.Equal(source, result.DeletedPath);
+        Assert.False(File.Exists(source));
         Assert.Null(await workspace.Repository.GetItemAsync(item.Id));
-        Assert.Contains("引用", result.StatusMessage);
+        Assert.Contains("已删除", result.StatusMessage);
     }
 
     [Fact]

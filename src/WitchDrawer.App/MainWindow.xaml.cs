@@ -26,6 +26,9 @@ public partial class MainWindow : Window
     private readonly PaperTodoHost _paperTodoHost;
     private readonly IAppLogger _logger;
     private DesktopPaperManagerWindow? _desktopPaperManagerWindow;
+    private WeeklyPlanService? _weeklyPlanService;
+    private WeeklyPlanWindow? _weeklyPlanWindow;
+    private Task? _weeklyPlanInitialization;
     private readonly QuickPanelHotKeySettingsStore _hotKeySettings;
     private QuickPanelHotKey _quickPanelHotKey;
     private NativeHotKey? _hotKey;
@@ -165,6 +168,8 @@ public partial class MainWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        _weeklyPlanWindow?.ForceClose();
+        _weeklyPlanService?.Dispose();
         Loaded -= OnLoaded;
         DpiChanged -= OnDpiChanged;
         AppThemeManager.ThemeChanged -= OnThemeChanged;
@@ -180,6 +185,60 @@ public partial class MainWindow : Window
         UpdateIconDisplayMetrics(VisualTreeHelper.GetDpi(this));
         AppThemeManager.ApplyToWindow(this, WindowBackdropKind.MainWindow);
         WindowMotion.PopIn(this, 0.985, 160);
+    }
+
+    internal async Task InitializeWeeklyPlanAsync()
+    {
+        try { await EnsureWeeklyPlanAsync(); }
+        catch (Exception ex) { _logger.Error(ex, "Failed to restore weekly plan."); }
+    }
+
+    protected override async void OnActivated(EventArgs e)
+    {
+        base.OnActivated(e);
+        if (!ViewModel.IsWeeklyPlanPage || _weeklyPlanService is null) return;
+        try { await _weeklyPlanService.RefreshProjectsAsync(); }
+        catch (Exception ex) { _logger.Error(ex, "Failed to refresh weekly plan project links."); }
+    }
+
+    private Task EnsureWeeklyPlanAsync() => _weeklyPlanInitialization ??= CreateWeeklyPlanAsync();
+
+    private async Task CreateWeeklyPlanAsync()
+    {
+        _weeklyPlanService ??= ViewModel.CreateWeeklyPlanService(_paperTodoHost);
+        await _weeklyPlanService.InitializeAsync();
+        var view = new WeeklyPlanView(_weeklyPlanService);
+        view.DesktopRequested += (_, _) => ShowWeeklyPlanDesktop();
+        WeeklyPlanPageHost.Content = view;
+        if (_weeklyPlanService.State.IsVisible) ShowWeeklyPlanDesktop();
+    }
+
+    private async void OnWeeklyPlanClicked(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            await EnsureWeeklyPlanAsync();
+            await _weeklyPlanService!.RefreshProjectsAsync();
+            ViewModel.ShowWeeklyPlan();
+        }
+        catch (Exception ex) { MessageBox.Show(this, ex.Message, "周计划", MessageBoxButton.OK, MessageBoxImage.Warning); }
+    }
+
+    private void ShowWeeklyPlanDesktop()
+    {
+        if (_weeklyPlanWindow is null)
+        {
+            _weeklyPlanWindow = new WeeklyPlanWindow(_weeklyPlanService!);
+            _weeklyPlanWindow.Closed += (_, _) => _weeklyPlanWindow = null;
+        }
+        _weeklyPlanWindow.Show();
+        _weeklyPlanWindow.Activate();
+    }
+
+    internal async Task FlushWeeklyPlanAsync()
+    {
+        if (_weeklyPlanService is not null) await _weeklyPlanService.WaitForPendingChangesAsync();
+        if (_weeklyPlanWindow is not null) await _weeklyPlanWindow.FlushAsync();
     }
 
     private void ConfigureBoxControlsTransition()

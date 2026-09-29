@@ -45,6 +45,51 @@ public sealed class DrawerServiceStorageSynchronizationTests
     }
 
     [Fact]
+    public async Task GetItemsAsync_IgnoresOfficeLockFilesWhileDocumentIsOpen()
+    {
+        using var workspace = await TestWorkspace.CreateAsync();
+        var box = (await workspace.Service.GetBoxesAsync())
+            .Single(candidate => candidate.Type == BoxType.Normal);
+        var documentPath = Path.Combine(box.StoragePath!, "华远QMS&W.xlsx");
+        var lockFilePath = Path.Combine(box.StoragePath!, "~$华远QMS&W.xlsx");
+        await File.WriteAllTextAsync(documentPath, "document");
+        await File.WriteAllTextAsync(lockFilePath, "lock");
+
+        var items = await workspace.Service.GetItemsAsync(box.Id);
+
+        var item = Assert.Single(items);
+        Assert.Equal("华远QMS&W.xlsx", item.DisplayName);
+        Assert.True(File.Exists(lockFilePath));
+    }
+
+    [Fact]
+    public async Task GetItemsAsync_RemovesPreviouslyTrackedOfficeLockFileFromTheIndex()
+    {
+        using var workspace = await TestWorkspace.CreateAsync();
+        var box = (await workspace.Service.GetBoxesAsync())
+            .Single(candidate => candidate.Type == BoxType.Normal);
+        var lockFilePath = Path.Combine(box.StoragePath!, "~$华远QMS&W.xlsx");
+        await File.WriteAllTextAsync(lockFilePath, "lock");
+        var now = DateTimeOffset.UtcNow;
+        await workspace.Repository.AddItemAsync(
+            new DrawerItem(
+                Guid.NewGuid(),
+                box.Id,
+                Path.GetFileName(lockFilePath),
+                ItemKind.File,
+                SourcePath: null,
+                lockFilePath,
+                SortOrder: 0,
+                now,
+                now));
+
+        var items = await workspace.Service.GetItemsAsync(box.Id);
+
+        Assert.Empty(items);
+        Assert.True(File.Exists(lockFilePath));
+    }
+
+    [Fact]
     public async Task GetAllItemsAsync_CalibratesManagedStorageBoxesInTheBackgroundPath()
     {
         using var workspace = await TestWorkspace.CreateAsync();
@@ -116,13 +161,16 @@ public sealed class DrawerServiceStorageSynchronizationTests
 
     private sealed class TestWorkspace : IDisposable
     {
-        private TestWorkspace(string root, DrawerService service)
+        private TestWorkspace(string root, DrawerRepository repository, DrawerService service)
         {
             Root = root;
+            Repository = repository;
             Service = service;
         }
 
         public string Root { get; }
+
+        public DrawerRepository Repository { get; }
 
         public DrawerService Service { get; }
 
@@ -136,7 +184,7 @@ public sealed class DrawerServiceStorageSynchronizationTests
             var repository = new DrawerRepository(paths.DatabasePath);
             var service = new DrawerService(paths, repository);
             await service.InitializeAsync();
-            return new TestWorkspace(root, service);
+            return new TestWorkspace(root, repository, service);
         }
 
         public void Dispose()

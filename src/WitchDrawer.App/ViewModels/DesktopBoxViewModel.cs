@@ -42,6 +42,7 @@ public sealed class DesktopBoxViewModel : ObservableObject
     private readonly IProjectTodoCountProvider? _projectTodoCountProvider;
     private readonly IFileLauncher _launcher;
     private readonly IAppLogger _logger;
+    private readonly Func<DrawerItemViewModel, bool> _confirmItemDeletion;
     private readonly DesktopBoxLayoutSettings _layoutSettings;
     private Box _box;
     private BoxVisualStyle _visualStyle;
@@ -113,7 +114,8 @@ public sealed class DesktopBoxViewModel : ObservableObject
         ProjectService? projectService = null,
         NoteService? noteService = null,
         ProjectFolderService? projectFolderService = null,
-        IProjectTodoCountProvider? projectTodoCountProvider = null)
+        IProjectTodoCountProvider? projectTodoCountProvider = null,
+        Func<DrawerItemViewModel, bool>? confirmItemDeletion = null)
     {
         _box = box;
         _visualStyle = visualStyle;
@@ -125,6 +127,7 @@ public sealed class DesktopBoxViewModel : ObservableObject
         _noteService = noteService ?? new NoteService(todoService.Repository);
         _launcher = launcher;
         _logger = logger;
+        _confirmItemDeletion = confirmItemDeletion ?? (_ => true);
         _layoutSettings = layoutSettings ?? new DesktopBoxLayoutSettings(box.Type == BoxType.Drawer);
         _layoutSettings.PropertyChanged += OnLayoutSettingsChanged;
 
@@ -2177,6 +2180,24 @@ public sealed class DesktopBoxViewModel : ObservableObject
         }
     }
 
+    public async Task<bool> RefreshAfterExternalDragAsync(DrawerItemViewModel? item)
+    {
+        if (item is null || IsBusy)
+        {
+            return false;
+        }
+
+        await LoadAsync();
+        var wasRemoved = Items.All(candidate => candidate.Id != item.Id);
+        if (wasRemoved)
+        {
+            StatusText = $"已移出收纳盒：{item.DisplayName}";
+            ItemsChanged?.Invoke(this, EventArgs.Empty);
+        }
+
+        return wasRemoved;
+    }
+
     private async Task LoadMappingViewModeAsync()
     {
         if (!IsMappingBox)
@@ -2247,6 +2268,12 @@ public sealed class DesktopBoxViewModel : ObservableObject
     private async Task DeleteItemAsync(DrawerItemViewModel? item)
     {
         if (item is null)
+        {
+            return;
+        }
+
+        if ((Type is BoxType.Normal or BoxType.Mapping)
+            && !_confirmItemDeletion(item))
         {
             return;
         }
